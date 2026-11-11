@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex,nofollow">
+<title>Files</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2314b8a6'/%3E%3Cpath d='M9 20a4 4 0 0 1-.3-8A6 6 0 0 1 20 11a4.5 4.5 0 0 1 .5 9z' fill='white'/%3E%3C/svg%3E">
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo" id="logo"></span><h1>Files</h1></div>
+  <div class="search"><span id="searchIco"></span><input id="q" class="field" type="search" placeholder="Search this folder" autocomplete="off" aria-label="Search this folder"></div>
+  <div class="actions">
+    <button id="btnView" class="btn sq" title="Switch grid / list" aria-label="Switch grid or list view"></button>
+    <button id="btnTheme" class="btn sq" title="Switch light / dark" aria-label="Switch light or dark theme"></button>
+    <button id="btnFolder" class="btn ghost"><span id="folderIco"></span><span class="lbl">New folder</span></button>
+    <label class="btn primary" for="file"><span id="uploadIco"></span><span class="lbl">Upload</span></label>
+    <input id="file" type="file" multiple style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
+  </div>
+</header>
+<main>
+  <section class="usage glass">
+    <div class="u-top"><strong id="uText">Checking storage…</strong><span id="uSub"></span></div>
+    <div class="meter" id="uMeter"><i id="uBar"></i></div>
+  </section>
+  <nav id="crumbs" class="crumbs" aria-label="Breadcrumb"></nav>
+  <div class="bar">
+    <span id="count"></span>
+    <div class="tools">
+      <select id="sortBy" aria-label="Sort by"><option value="name">Name</option><option value="size">Size</option><option value="date">Modified</option></select>
+      <button id="sortDir" class="btn" title="Reverse order" aria-label="Reverse sort order"></button>
+    </div>
+  </div>
+  <section id="list" class="list" data-view="grid"></section>
+</main>
+
+<div id="drop" class="drop"><div>Drop to upload<small>Files and folders go into the folder you are viewing</small></div></div>
+
+<aside id="uploads" class="uploads glass" hidden>
+  <div class="u-head">
+    <div><b id="upTitle">Uploads</b><small id="upSub"></small></div>
+    <div><button id="upToggle" class="ib" title="Collapse"></button><button id="upClear" class="ib" title="Clear finished"></button></div>
+  </div>
+  <div class="u-over"><div class="meter sm"><i id="upBar"></i></div></div>
+  <div id="upList" class="u-list"></div>
+</aside>
+
+<div id="modal" class="modal" hidden></div>
+<div id="toasts" aria-live="polite"></div>
+<noscript><p style="padding:24px">This file manager needs JavaScript.</p></noscript>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
