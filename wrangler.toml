@@ -1,0 +1,16 @@
+name = "r2-files"
+main = "src/worker.js"
+compatibility_date = "2025-06-01"
+
+# Everything must go through upload.bunnxr.com (behind Cloudflare Access)
+workers_dev = false
+preview_urls = false
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true   # the Worker checks Access and adds security headers before serving files
+
+[[routes]]
+pattern = "upload.bunnxr.com"
+custom_domain = true
