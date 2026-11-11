@@ -1,5 +1,5 @@
 // Settings (title, colours, upload tuning) come from the Worker's CONFIG via /api/config.
-let BOOT = { title: 'Files', accent: '', parallel: 4, retries: 3, view: 'grid' };
+let BOOT = { title: 'CHARLie-r2', accent: '', parallel: 4, retries: 3, view: 'grid' };
 try { const r = await fetch('/api/config'); if (r.ok) BOOT = await r.json(); } catch (e) { /* keep defaults */ }
 document.title = BOOT.title;
 { const h1 = document.querySelector('.brand h1'); if (h1) h1.textContent = BOOT.title; }

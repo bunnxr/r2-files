@@ -27,7 +27,7 @@ const CONFIG = {
   URL_EXPIRY_SECONDS: 3600,         // lifetime of presigned upload/download URLs (max 604800)
 
   // ---- Look and feel
-  SITE_TITLE: "My Files",           // shown in the header and browser tab
+  SITE_TITLE: "CHARLie-r2",         // shown in the header and browser tab
   ACCENT: "#0d6efd",                // accent colour (hex): buttons, links, highlights
   DEFAULT_VIEW: "list",             // "list" (table) or "grid" (cards); the visitor's choice is remembered
 
