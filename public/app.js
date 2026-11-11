@@ -7,7 +7,7 @@ if (BOOT.accent) document.documentElement.style.setProperty('--accent', BOOT.acc
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const ls = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+const ls = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { } } };
 const fmt = (n) => { const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (i === 0 ? n : Math.round(n * 10) / 10) + ' ' + u[i]; };
 const fdate = (s) => (s ? new Date(s).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '');
 const CANCEL = new Error('Canceled');
@@ -123,7 +123,7 @@ function readRoute() {
   const raw = location.hash.slice(1);
   if (raw.indexOf('view=') === 0) { const k = raw.slice(5); return { kind: KINDS.indexOf(k) >= 0 ? k : 'recent', prefix: '' }; }
   let h = '';
-  try { h = decodeURIComponent(raw); } catch (e) {}
+  try { h = decodeURIComponent(raw); } catch (e) { }
   if (h && !h.endsWith('/')) h += '/';
   return { kind: '', prefix: h };
 }
@@ -298,8 +298,8 @@ async function preview(it) {
     const u = esc(r.url);
     box.innerHTML = k === 'image' ? '<img src="' + u + '" alt="' + esc(it.name) + '">'
       : k === 'video' ? '<video src="' + u + '" controls playsinline autoplay></video>'
-      : k === 'audio' ? '<audio src="' + u + '" controls autoplay></audio>'
-      : '<iframe src="' + u + '" title="' + esc(it.name) + '"></iframe>';
+        : k === 'audio' ? '<audio src="' + u + '" controls autoplay></audio>'
+          : '<iframe src="' + u + '" title="' + esc(it.name) + '"></iframe>';
     if (k === 'pdf') { const dl = $('[data-x=dl]', modalEl); if (dl) dl.insertAdjacentHTML('beforebegin', '<a class="btn" href="' + u + '" target="_blank" rel="noopener">Open</a>'); }
   } catch (e) { closeModal(); toast(e.message, 'err'); }
 }
@@ -311,7 +311,7 @@ async function del(it) {
   try {
     if (isF) {
       let n = 0;
-      for (;;) { const r = await api('/api/delete-folder', { prefix: it.key }); if (!r.deleted) break; n += r.deleted; t.set('Deleting… ' + n + ' items removed'); }
+      for (; ;) { const r = await api('/api/delete-folder', { prefix: it.key }); if (!r.deleted) break; n += r.deleted; t.set('Deleting… ' + n + ' items removed'); }
     } else await api('/api/delete', { key: it.key });
     t.close(); toast('Deleted “' + it.name + '”', 'ok');
   } catch (e) { t.close(); toast(e.message, 'err'); }
@@ -339,7 +339,7 @@ function enqueue(entries) {
 async function pump() {
   if (running) return;
   running = true;
-  for (;;) {
+  for (; ;) {
     const it = queue.find((i) => i.state === 'queued');
     if (!it) break;
     await uploadFile(it);
@@ -417,7 +417,7 @@ async function uploadFile(it) {
     } else if (it.canceled) throw CANCEL;
     it.state = 'done';
   } catch (e) {
-    if (init && init.uploadId) api('/api/upload/abort', { key: init.key, uploadId: init.uploadId }).catch(() => {});
+    if (init && init.uploadId) api('/api/upload/abort', { key: init.key, uploadId: init.uploadId }).catch(() => { });
     if (it.canceled || e === CANCEL) it.state = 'canceled';
     else { it.state = 'error'; it.error = e.message || 'Upload failed'; }
   }
@@ -436,7 +436,7 @@ function renderUploads() {
   $('#upList').innerHTML = queue.map((it) => {
     const btn = it.state === 'queued' || it.state === 'uploading' ? '<button class="ib" data-u="cancel" title="Cancel" aria-label="Cancel upload">' + ico('x', 16) + '</button>'
       : it.state === 'done' ? '<span class="u-ok">' + ico('check', 18) + '</span>'
-      : '<button class="ib" data-u="retry" title="Try again" aria-label="Try again">' + ico('retry', 16) + '</button>';
+        : '<button class="ib" data-u="retry" title="Try again" aria-label="Try again">' + ico('retry', 16) + '</button>';
     return '<div class="u-item ' + it.state + '" data-id="' + it.id + '"><div class="u-row"><span class="u-name" title="' + esc(it.name) + '">' + esc(it.name) + '</span>' + btn + '</div><div class="meter sm"><i data-b></i></div><small data-m></small></div>';
   }).join('');
   paintUploads();
@@ -461,9 +461,9 @@ function paintUploads() {
     $('[data-b]', row).style.width = (it.state === 'done' ? 100 : pct) + '%';
     $('[data-m]', row).textContent =
       it.state === 'queued' ? 'Waiting, ' + fmt(it.size)
-      : it.state === 'uploading' ? Math.floor(pct) + '%, ' + fmt(loaded) + ' of ' + fmt(it.size) + (it.speed > 0 ? ', ' + fmt(it.speed) + '/s' : '')
-      : it.state === 'done' ? 'Uploaded, ' + fmt(it.size)
-      : it.state === 'canceled' ? 'Canceled' : it.error;
+        : it.state === 'uploading' ? Math.floor(pct) + '%, ' + fmt(loaded) + ' of ' + fmt(it.size) + (it.speed > 0 ? ', ' + fmt(it.speed) + '/s' : '')
+          : it.state === 'done' ? 'Uploaded, ' + fmt(it.size)
+            : it.state === 'canceled' ? 'Canceled' : it.error;
   });
   const pct = tot ? (got / tot) * 100 : 0;
   $('#upBar').style.width = pct + '%';
@@ -489,7 +489,7 @@ async function walk(entry, path, out) {
     if (entry.isFile) { const f = await new Promise((res, rej) => entry.file(res, rej)); out.push({ file: f, rel: path }); }
     else if (entry.isDirectory) {
       const rd = entry.createReader(); let all = [];
-      for (;;) { const b = await new Promise((res, rej) => rd.readEntries(res, rej)); if (!b.length) break; all = all.concat(Array.from(b)); }
+      for (; ;) { const b = await new Promise((res, rej) => rd.readEntries(res, rej)); if (!b.length) break; all = all.concat(Array.from(b)); }
       for (const en of all) await walk(en, path + entry.name + '/', out);
     }
   } catch (e) { /* skip unreadable entries */ }
