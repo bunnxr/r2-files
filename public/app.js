@@ -30,8 +30,6 @@ const P = {
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
-  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   chev: '<path d="m9 6 6 6-6 6"/>',
@@ -103,13 +101,7 @@ function askFolder() {
   });
 }
 
-/* ---------- theme / view ---------- */
-const root = document.documentElement;
-function applyTheme(t) { root.dataset.theme = t; $('#btnTheme').innerHTML = ico(t === 'dark' ? 'sun' : 'moon', 19); }
-const mq = matchMedia('(prefers-color-scheme: dark)');
-applyTheme(ls.get('fm-theme') || (mq.matches ? 'dark' : 'light'));
-if (mq.addEventListener) mq.addEventListener('change', () => { if (!ls.get('fm-theme')) applyTheme(mq.matches ? 'dark' : 'light'); });
-$('#btnTheme').onclick = () => { const n = root.dataset.theme === 'dark' ? 'light' : 'dark'; ls.set('fm-theme', n); applyTheme(n); };
+/* ---------- view ---------- */
 function applyView() { $('#list').dataset.view = S.view; $('#btnView').innerHTML = ico(S.view === 'grid' ? 'list' : 'grid', 19); }
 $('#btnView').onclick = () => { S.view = S.view === 'grid' ? 'list' : 'grid'; ls.set('fm-view', S.view); applyView(); };
 $('#logo').innerHTML = ico('cloud', 21);
@@ -308,6 +300,7 @@ async function preview(it) {
       : k === 'video' ? '<video src="' + u + '" controls playsinline autoplay></video>'
       : k === 'audio' ? '<audio src="' + u + '" controls autoplay></audio>'
       : '<iframe src="' + u + '" title="' + esc(it.name) + '"></iframe>';
+    if (k === 'pdf') { const dl = $('[data-x=dl]', modalEl); if (dl) dl.insertAdjacentHTML('beforebegin', '<a class="btn" href="' + u + '" target="_blank" rel="noopener">Open</a>'); }
   } catch (e) { closeModal(); toast(e.message, 'err'); }
 }
 async function del(it) {
