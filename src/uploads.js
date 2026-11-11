@@ -1,5 +1,5 @@
-import { HttpError, validKey, validPrefix, sanitizeName, fmtBytes } from "./util.js";
-import { r2, xmlEsc, xmlTag, r2Error, parseList, bucketUsage, uniqueKey } from "./r2.js";
+import { HttpError, validKey, validPrefix, sanitizeName } from "./util.js";
+import { r2, xmlEsc, xmlTag, r2Error, parseList, uniqueKey } from "./r2.js";
 import { rfc3986 } from "./sigv4.js";
 
 // ---------------------------------------------------------------------
@@ -16,13 +16,6 @@ async function uploadInit(c, b) {
   const dest = prefix + (rel ? rel + "/" : "");
   const name = sanitizeName(b.name);
 
-  if (size > c.MAX_FILE_BYTES) {
-    throw new HttpError(413, '"' + name + '" is ' + fmtBytes(size) + ", which is over the per-file limit of " + fmtBytes(c.MAX_FILE_BYTES) + ".");
-  }
-  const { used } = await bucketUsage(c);
-  if (used + size > c.MAX_TOTAL_BYTES) {
-    throw new HttpError(413, "Not enough space for \"" + name + "\" (" + fmtBytes(size) + "). Used " + fmtBytes(used) + " of " + fmtBytes(c.MAX_TOTAL_BYTES) + ".");
-  }
 
   const key = await uniqueKey(c, dest, name);
   const type = /^[\w.+-]+\/[\w.+-]+$/.test(String(b.type || "")) ? String(b.type) : "application/octet-stream";
@@ -56,14 +49,7 @@ async function uploadComplete(c, b) {
   const res = await r2(c, "POST", b.key, { query: { uploadId: b.uploadId }, body: xml });
   if (!res.ok || /<Error>/.test(res.text)) throw new HttpError(502, r2Error(res));
 
-  // enforce the per-file limit on what actually arrived (the browser could have lied about the size)
-  const head = await r2(c, "HEAD", b.key);
-  const size = Number(head.headers.get("content-length") || 0);
-  if (size > c.MAX_FILE_BYTES) {
-    await r2(c, "DELETE", b.key);
-    throw new HttpError(413, "The uploaded file is over the per-file limit and was removed.");
-  }
-  return { ok: true, key: b.key, size };
+  return { ok: true, key: b.key };
 }
 
 async function deleteFolderBatch(c, prefix) {

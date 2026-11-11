@@ -1,6 +1,6 @@
 // R2 File Manager: Worker entry point (routing). Static files live in /public.
 import { getConfig, configProblems } from "./config.js";
-import { HttpError, json, readJson, safeColor, validKey, validPrefix, sanitizeName } from "./util.js";
+import { HttpError, json, readJson, safeColor, validKey, validPrefix, sanitizeName, TYPES, typeOf } from "./util.js";
 import { presign } from "./sigv4.js";
 import { r2, listAll, bucketUsage, r2Error } from "./r2.js";
 import { verifyAccess } from "./access.js";
@@ -47,10 +47,19 @@ async function handle(request, env) {
       return json({ prefix, folders: r.folders, files: r.files.filter((f) => f.key !== prefix), truncated: r.truncated });
     }
     case "GET /api/config":
-      return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#14b8a6"), accent2: safeColor(c.ACCENT_2, "#6366f1"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW });
+      return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0d6efd"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW });
     case "GET /api/usage": {
       const u = await bucketUsage(c);
-      return json({ used: u.used, limit: c.MAX_TOTAL_BYTES, fileLimit: c.MAX_FILE_BYTES, count: u.count, partial: u.partial });
+      return json({ used: u.used, count: u.count, partial: u.partial, byType: u.byType });
+    }
+    case "GET /api/browse": {
+      const type = url.searchParams.get("type") || "recent";
+      if (type !== "recent" && !TYPES.includes(type)) throw new HttpError(400, "Unknown file type.");
+      const u = await bucketUsage(c);
+      const all = u.files.filter((f) => !f.key.endsWith("/") && (type === "recent" || typeOf(f.key) === type));
+      all.sort((a, z) => (a.modified < z.modified ? 1 : a.modified > z.modified ? -1 : 0));
+      const limit = type === "recent" ? 100 : 500;
+      return json({ type, total: all.length, files: all.slice(0, limit), truncated: all.length > limit || u.partial });
     }
     case "POST /api/mkdir": {
       const b = await readJson(request);

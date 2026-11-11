@@ -1,10 +1,9 @@
 // Settings (title, colours, upload tuning) come from the Worker's CONFIG via /api/config.
-let BOOT = { title: 'Files', accent: '', accent2: '', parallel: 4, retries: 3, view: 'grid' };
+let BOOT = { title: 'Files', accent: '', parallel: 4, retries: 3, view: 'grid' };
 try { const r = await fetch('/api/config'); if (r.ok) BOOT = await r.json(); } catch (e) { /* keep defaults */ }
 document.title = BOOT.title;
 { const h1 = document.querySelector('.brand h1'); if (h1) h1.textContent = BOOT.title; }
 if (BOOT.accent) document.documentElement.style.setProperty('--accent', BOOT.accent);
-if (BOOT.accent2) document.documentElement.style.setProperty('--accent2', BOOT.accent2);
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -43,11 +42,12 @@ const P = {
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   sort: '<path d="M12 5v14m0 0 5-5m-5 5-5-5"/>',
   ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   broom: '<path d="M4 20h16M7 20l1-9h8l1 9M10 11V4h4v7"/>'
 };
 const ico = (n, s) => '<svg class="i" width="' + (s || 18) + '" height="' + (s || 18) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + P[n] + '</svg>';
 const EXT = { image: 'jpg jpeg png gif webp avif svg bmp heic heif ico tif tiff', video: 'mp4 mov m4v webm mkv avi wmv', audio: 'mp3 wav flac aac m4a ogg opus', pdf: 'pdf', archive: 'zip rar 7z tar gz tgz bz2 xz', code: 'js ts jsx tsx json html css py rb go rs java c cpp h php sh sql yml yaml xml md', sheet: 'xls xlsx csv tsv ods numbers', doc: 'doc docx odt rtf txt pages ppt pptx key' };
-const KC = { folder: '#f59e0b', image: '#10b981', video: '#ec4899', audio: '#8b5cf6', pdf: '#ef4444', archive: '#f97316', code: '#0ea5e9', sheet: '#22c55e', doc: '#3b82f6', file: '#94a3b8' };
+const KC = { folder: '#3b82f6', image: '#10b981', video: '#ec4899', audio: '#8b5cf6', pdf: '#ef4444', archive: '#f59e0b', code: '#0ea5e9', sheet: '#22a06b', doc: '#3b82f6', file: '#94a3b8' };
 const GLYPH = { folder: 'folder', image: 'image', video: 'video', audio: 'audio', pdf: 'doc', archive: 'archive', code: 'code', sheet: 'sheet', doc: 'doc', file: 'file' };
 const PREV = { image: 1, video: 1, audio: 1, pdf: 1 };
 const kindOf = (name) => { const e = name.indexOf('.') < 0 ? '' : name.split('.').pop().toLowerCase(); for (const k in EXT) if ((' ' + EXT[k] + ' ').indexOf(' ' + e + ' ') >= 0 && e) return k; return 'file'; };
@@ -120,20 +120,54 @@ $('#upToggle').innerHTML = ico('down', 18);
 $('#upClear').innerHTML = ico('broom', 17);
 
 /* ---------- browsing ---------- */
-function readHash() { let h = ''; try { h = decodeURIComponent(location.hash.slice(1)); } catch (e) {} if (h && !h.endsWith('/')) h += '/'; return h; }
+const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other'];
+const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files' };
+const CAT = { image: ['Images', '#3b82f6', 'image'], video: ['Videos', '#ef4444', 'video'], audio: ['Audio', '#8b5cf6', 'audio'], doc: ['Documents', '#22a06b', 'doc'], archive: ['Archives', '#f59e0b', 'archive'], other: ['Other', '#64748b', 'file'] };
+const NAV = [['', 'All files', 'folder'], ['recent', 'Recent', 'clock'], ['image', 'Images', 'image'], ['video', 'Videos', 'video'], ['audio', 'Audio', 'audio'], ['doc', 'Documents', 'doc'], ['archive', 'Archives', 'archive'], ['other', 'Other', 'file']];
+S.kind = ''; S.usage = null; S.total = 0; S.shownFolders = [];
+$('#sortDir').innerHTML = ico('sort', 17);
+
+function readRoute() {
+  const raw = location.hash.slice(1);
+  if (raw.indexOf('view=') === 0) { const k = raw.slice(5); return { kind: KINDS.indexOf(k) >= 0 ? k : 'recent', prefix: '' }; }
+  let h = '';
+  try { h = decodeURIComponent(raw); } catch (e) {}
+  if (h && !h.endsWith('/')) h += '/';
+  return { kind: '', prefix: h };
+}
 function go(prefix) { location.hash = prefix ? encodeURIComponent(prefix) : ''; }
-window.addEventListener('hashchange', () => { S.prefix = readHash(); S.q = ''; $('#q').value = ''; load(); });
+function setSort(by, dir) {
+  S.by = by; S.dir = dir; $('#sortBy').value = by;
+  const a = $('#sortDir').firstChild; if (a) a.style.transform = dir < 0 ? 'rotate(180deg)' : '';
+}
+function applyRoute() {
+  const r = readRoute();
+  S.kind = r.kind; S.prefix = r.prefix; S.q = ''; $('#q').value = '';
+  if (S.kind) setSort('date', -1); else setSort('name', 1);
+  load();
+}
+window.addEventListener('hashchange', applyRoute);
 
 async function load(silent) {
   const seq = ++S.seq;
   if (!silent) { S.loading = true; S.error = ''; render(); }
   try {
-    const d = await api('/api/list?prefix=' + encodeURIComponent(S.prefix));
-    if (seq !== S.seq) return;
-    S.folders = d.folders.map((k) => ({ type: 'folder', key: k, name: k.slice(S.prefix.length).replace(/\/$/, '') }));
-    S.files = d.files.map((f) => ({ type: 'file', key: f.key, name: f.key.slice(S.prefix.length), size: f.size, modified: f.modified }));
+    if (S.kind) {
+      const d = await api('/api/browse?type=' + encodeURIComponent(S.kind));
+      if (seq !== S.seq) return;
+      S.folders = [];
+      S.files = d.files.map((f) => { const i = f.key.lastIndexOf('/'); return { type: 'file', key: f.key, name: f.key.slice(i + 1), dir: i > 0 ? f.key.slice(0, i) : '', size: f.size, modified: f.modified }; });
+      S.total = d.total;
+      if (d.truncated) toast('Showing the newest ' + d.files.length + ' files only. Use the search box or folders to find older ones.', 'info', 6000);
+    } else {
+      const d = await api('/api/list?prefix=' + encodeURIComponent(S.prefix));
+      if (seq !== S.seq) return;
+      S.folders = d.folders.map((k) => ({ type: 'folder', key: k, name: k.slice(S.prefix.length).replace(/\/$/, '') }));
+      S.files = d.files.map((f) => ({ type: 'file', key: f.key, name: f.key.slice(S.prefix.length), dir: '', size: f.size, modified: f.modified }));
+      S.total = S.files.length;
+      if (d.truncated) toast('This folder is very large, so only the first items are shown. Use the search box or sub-folders.', 'info', 6000);
+    }
     S.loading = false; S.error = '';
-    if (d.truncated) toast('This folder is very large, so only the first items are shown. Use the search box or sub-folders.', 'info', 6000);
   } catch (e) {
     if (seq !== S.seq) return;
     S.loading = false;
@@ -145,84 +179,111 @@ async function load(silent) {
 async function loadUsage() {
   try {
     const u = await api('/api/usage');
-    const pct = u.limit ? Math.min(100, (u.used / u.limit) * 100) : 0;
-    $('#uText').textContent = fmt(u.used) + ' of ' + fmt(u.limit) + ' used' + (u.partial ? ' (at least)' : '');
-    $('#uSub').textContent = fmt(Math.max(0, u.limit - u.used)) + ' free, up to ' + fmt(u.fileLimit) + ' per file';
-    $('#uBar').style.width = pct + '%';
-    $('#uMeter').className = 'meter' + (pct >= 95 ? ' full' : pct >= 80 ? ' warn' : '');
-  } catch (e) { $('#uText').textContent = 'Storage usage unavailable'; $('#uSub').textContent = e.message; }
+    S.usage = u;
+    $('#uBig').textContent = fmt(u.used);
+    $('#uSub').textContent = u.count + (u.count === 1 ? ' file' : ' files') + (u.partial ? ' (at least)' : '');
+    const keys = Object.keys(CAT).filter((k) => u.byType[k] && u.byType[k].count).sort((a, b) => u.byType[b].size - u.byType[a].size);
+    $('#uSeg').innerHTML = u.used ? keys.map((k) => '<i title="' + CAT[k][0] + '" style="width:' + Math.max(1.5, (u.byType[k].size / u.used) * 100) + '%;background:' + CAT[k][1] + '"></i>').join('') : '';
+    $('#uTypes').innerHTML = keys.length ? keys.map((k) => '<li><a href="#view=' + k + '"><span class="tile" style="--c:' + CAT[k][1] + '">' + ico(CAT[k][2], 18) + '</span><span class="t-n"><b>' + CAT[k][0] + '</b><small>' + u.byType[k].count + (u.byType[k].count === 1 ? ' file' : ' files') + '</small></span><span class="t-s">' + fmt(u.byType[k].size) + '</span></a></li>').join('') : '<li class="muted">Nothing stored yet</li>';
+    renderNav();
+  } catch (e) { $('#uBig').textContent = '–'; $('#uSub').textContent = e.message; }
 }
 
-function sortedItems() {
+function filtered() {
   const q = S.q.trim().toLowerCase();
-  const match = (i) => !q || i.name.toLowerCase().indexOf(q) >= 0;
+  const match = (i) => !q || i.name.toLowerCase().indexOf(q) >= 0 || (i.dir && i.dir.toLowerCase().indexOf(q) >= 0);
   const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-  const folders = S.folders.filter(match).sort((a, b) => (S.by === 'name' ? S.dir : 1) * byName(a, b));
   const cmp = S.by === 'size' ? (a, b) => a.size - b.size : S.by === 'date' ? (a, b) => (a.modified > b.modified ? 1 : a.modified < b.modified ? -1 : 0) : byName;
-  const files = S.files.filter(match).sort((a, b) => S.dir * cmp(a, b) || byName(a, b));
-  return folders.concat(files);
+  const folders = S.folders.filter(match).sort(byName);
+  if (S.by === 'name' && S.dir < 0) folders.reverse();
+  return { folders: folders, files: S.files.filter(match).sort((a, b) => S.dir * cmp(a, b) || byName(a, b)) };
 }
 
 function itemHtml(it, i) {
-  const isF = it.type === 'folder';
-  const k = isF ? 'folder' : kindOf(it.name);
-  const pv = !isF && PREV[k];
+  const k = kindOf(it.name), pv = PREV[k];
   let acts = '';
   if (pv) acts += '<button class="ib" data-act="preview" title="Preview" aria-label="Preview ' + esc(it.name) + '">' + ico('eye', 17) + '</button>';
-  if (!isF) acts += '<button class="ib" data-act="download" title="Download" aria-label="Download ' + esc(it.name) + '">' + ico('download', 17) + '</button>';
+  acts += '<button class="ib" data-act="download" title="Download" aria-label="Download ' + esc(it.name) + '">' + ico('download', 17) + '</button>';
   acts += '<button class="ib danger" data-act="delete" title="Delete" aria-label="Delete ' + esc(it.name) + '">' + ico('trash', 17) + '</button>';
-  const sub = isF ? '<span>Folder</span>' : '<span>' + fmt(it.size) + '</span><span>' + esc(fdate(it.modified)) + '</span>';
-  return '<div class="item' + (isF || pv ? ' go' : '') + '" data-i="' + i + '"><div class="main">' + tile(k) + '<div class="nm"><b title="' + esc(it.name) + '">' + esc(it.name) + '</b><small class="sub">' + sub + '</small></div></div><span class="sz">' + (isF ? '' : fmt(it.size)) + '</span><span class="dt">' + (isF ? '' : esc(fdate(it.modified))) + '</span><div class="acts">' + acts + '</div></div>';
+  const date = esc(fdate(it.modified));
+  return '<div class="item' + (pv ? ' go' : '') + '" data-i="' + i + '"><div class="main">' + tile(k, 20) + '<div class="nm"><b title="' + esc(it.key) + '">' + esc(it.name) + '</b>' + (it.dir ? '<small class="path">' + esc(it.dir) + '</small>' : '') + '<small class="sub"><span>' + fmt(it.size) + '</span><span>' + date + '</span></small></div></div><span class="sz">' + fmt(it.size) + '</span><span class="dt">' + date + '</span><div class="acts">' + acts + '</div></div>';
+}
+function folderHtml(f, i) {
+  return '<div class="fcard" data-f="' + i + '"><div class="f-top">' + tile('folder', 22) + '<button class="ib danger" data-act="delete" title="Delete folder" aria-label="Delete folder ' + esc(f.name) + '">' + ico('trash', 17) + '</button></div><b title="' + esc(f.name) + '">' + esc(f.name) + '</b><small>Folder</small></div>';
+}
+function theadHtml() {
+  const a = (k) => (S.by === k ? (S.dir > 0 ? ' ↑' : ' ↓') : '');
+  return '<div class="thead"><span data-sort="name">Name' + a('name') + '</span><span data-sort="size">Size' + a('size') + '</span><span data-sort="date">Modified' + a('date') + '</span><span></span></div>';
 }
 
 function renderCrumbs() {
+  const el = $('#crumbs');
+  el.hidden = !(S.prefix || S.kind);
   const parts = S.prefix.split('/').filter(Boolean);
   let acc = '';
   let h = '<a href="#">' + esc(BOOT.title) + '</a>';
+  if (S.kind) h += '<span class="sep">' + ico('chev', 15) + '</span><span class="cur">' + esc(KIND_TITLE[S.kind]) + '</span>';
   parts.forEach((p, i) => {
     acc += p + '/';
     h += '<span class="sep">' + ico('chev', 15) + '</span>' + (i === parts.length - 1 ? '<span class="cur">' + esc(p) + '</span>' : '<a href="#' + esc(encodeURIComponent(acc)) + '">' + esc(p) + '</a>');
   });
-  $('#crumbs').innerHTML = h;
+  el.innerHTML = h;
+}
+function renderNav() {
+  const bt = (S.usage && S.usage.byType) || {};
+  $('#nav').innerHTML = NAV.map((n) => {
+    const on = n[0] === '' ? !S.kind : S.kind === n[0];
+    const c = bt[n[0]] ? bt[n[0]].count : 0;
+    return '<a href="' + (n[0] ? '#view=' + n[0] : '#') + '" class="' + (on ? 'on' : '') + '">' + ico(n[2], 18) + '<span>' + n[1] + '</span>' + (c ? '<em>' + c + '</em>' : '') + '</a>';
+  }).join('');
 }
 
 function render() {
-  renderCrumbs();
-  applyView();
-  const list = $('#list');
+  renderCrumbs(); renderNav(); applyView();
+  const list = $('#list'), typeMode = !!S.kind;
+  $('#filesTitle').textContent = typeMode ? KIND_TITLE[S.kind] : 'Files';
   if (S.loading) {
     let h = '';
-    for (let n = 0; n < 8; n++) h += '<div class="item"><div class="main"><span class="tile sk"></span><div class="nm" style="flex:1"><b class="sk" style="height:13px;width:70%;margin-bottom:8px"></b><small class="sk" style="height:10px;width:40%"></small></div></div></div>';
-    list.innerHTML = h; $('#count').textContent = 'Loading…'; return;
+    for (let n = 0; n < 6; n++) h += '<div class="item"><div class="main"><span class="tile sk"></span><div class="nm" style="flex:1"><b class="sk" style="height:12px;width:60%;margin-bottom:7px"></b><small class="sk" style="height:10px;width:35%"></small></div></div></div>';
+    $('#folderSec').hidden = true; list.innerHTML = h; $('#count').textContent = ''; return;
   }
   if (S.error) {
-    list.innerHTML = '<div class="empty"><h3>Could not load this folder</h3><p>' + esc(S.error) + '</p><button class="btn primary" data-act="retry">Try again</button></div>';
-    $('#count').textContent = ''; return;
+    $('#folderSec').hidden = true; $('#count').textContent = '';
+    list.innerHTML = '<div class="empty"><h3>Could not load this view</h3><p>' + esc(S.error) + '</p><button class="btn primary" data-act="retry">Try again</button></div>';
+    return;
   }
-  S.shown = sortedItems();
-  const total = S.folders.length + S.files.length;
-  if (!S.shown.length) {
-    list.innerHTML = S.q
-      ? '<div class="empty">' + tile('file', 28) + '<h3>No matches</h3><p>Nothing here matches “' + esc(S.q) + '”.</p></div>'
-      : '<div class="empty">' + tile('folder', 28) + '<h3>This folder is empty</h3><p>Drag files here or choose them from your device.</p><label class="btn primary" for="file">' + ico('upload', 17) + ' Upload files</label></div>';
-  } else list.innerHTML = S.shown.map(itemHtml).join('');
-  $('#count').textContent = S.q ? S.shown.length + ' of ' + total + ' items' : total + (total === 1 ? ' item' : ' items');
+  const v = filtered();
+  S.shown = v.files; S.shownFolders = v.folders;
+  $('#folderSec').hidden = !v.folders.length;
+  $('#folders').innerHTML = v.folders.map(folderHtml).join('');
+  if (v.files.length) list.innerHTML = (S.view === 'list' ? theadHtml() : '') + v.files.map(itemHtml).join('');
+  else if (S.q) list.innerHTML = '<div class="empty">' + tile('file', 28) + '<h3>No matches</h3><p>Nothing here matches “' + esc(S.q) + '”.</p></div>';
+  else if (v.folders.length) list.innerHTML = '<div class="empty"><p>No files in this folder yet. Drop files anywhere to upload.</p></div>';
+  else if (typeMode) list.innerHTML = '<div class="empty">' + tile('file', 28) + '<h3>Nothing here yet</h3><p>Files of this type will show up here.</p></div>';
+  else list.innerHTML = '<div class="empty">' + tile('folder', 28) + '<h3>This folder is empty</h3><p>Drag files here or choose them from your device.</p><label class="btn primary" for="file">' + ico('upload', 17) + ' Add file</label></div>';
+  const total = S.folders.length + S.total;
+  const shown = v.folders.length + v.files.length;
+  $('#count').textContent = S.q ? shown + ' of ' + total + ' items' : total + (total === 1 ? ' item' : ' items');
 }
 
 $('#q').addEventListener('input', (e) => { S.q = e.target.value; render(); });
-$('#sortBy').addEventListener('change', (e) => { S.by = e.target.value; render(); });
-$('#sortDir').innerHTML = ico('sort', 17);
-$('#sortDir').onclick = () => { S.dir = -S.dir; $('#sortDir').firstChild.style.transform = S.dir < 0 ? 'rotate(180deg)' : ''; render(); };
-
+$('#sortBy').addEventListener('change', (e) => { setSort(e.target.value, S.dir); render(); });
+$('#sortDir').onclick = () => { setSort(S.by, -S.dir); render(); };
+$('#btnView').addEventListener('click', render);
+$('#folders').addEventListener('click', (e) => {
+  const row = e.target.closest('[data-f]'); if (!row) return;
+  const f = S.shownFolders[+row.dataset.f]; if (!f) return;
+  if (e.target.closest('[data-act=delete]')) del(f); else go(f.key);
+});
 $('#list').addEventListener('click', (e) => {
+  const s = e.target.closest('[data-sort]');
+  if (s) { const k = s.dataset.sort; if (S.by === k) setSort(k, -S.dir); else setSort(k, k === 'date' ? -1 : 1); render(); return; }
   const act = e.target.closest('[data-act]');
   if (act && act.dataset.act === 'retry') { load(); return; }
-  const row = e.target.closest('[data-i]');
-  if (!row) return;
-  const it = S.shown[+row.dataset.i];
-  if (!it) return;
+  const row = e.target.closest('[data-i]'); if (!row) return;
+  const it = S.shown[+row.dataset.i]; if (!it) return;
   if (act) { const a = act.dataset.act; if (a === 'download') download(it); else if (a === 'delete') del(it); else if (a === 'preview') preview(it); return; }
-  if (it.type === 'folder') go(it.key); else if (PREV[kindOf(it.name)]) preview(it);
+  if (PREV[kindOf(it.name)]) preview(it);
 });
 
 /* ---------- download / preview / delete / new folder ---------- */
@@ -457,7 +518,6 @@ window.addEventListener('drop', async (e) => {
 });
 
 /* ---------- start ---------- */
-S.prefix = readHash();
 applyView();
-load();
+applyRoute();
 loadUsage();

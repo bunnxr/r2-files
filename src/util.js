@@ -57,4 +57,21 @@ function sanitizeName(raw) {
 }
 
 
-export { HttpError, escHtml, safeColor, json, readJson, fmtBytes, validKey, validPrefix, sanitizeName };
+// File categories (used for the storage breakdown and the sidebar views)
+const TYPE_EXT = {
+  image: "jpg jpeg png gif webp avif svg bmp heic heif ico tif tiff",
+  video: "mp4 mov m4v webm mkv avi wmv",
+  audio: "mp3 wav flac aac m4a ogg opus",
+  archive: "zip rar 7z tar gz tgz bz2 xz",
+  doc: "pdf doc docx odt rtf txt md pages ppt pptx key xls xlsx csv tsv ods numbers",
+};
+const TYPES = ["image", "video", "audio", "doc", "archive", "other"];
+function typeOf(key) {
+  const n = key.split("/").pop();
+  const i = n.lastIndexOf(".");
+  const e = i > 0 ? n.slice(i + 1).toLowerCase() : "";
+  for (const t of Object.keys(TYPE_EXT)) if (e && (" " + TYPE_EXT[t] + " ").includes(" " + e + " ")) return t;
+  return "other";
+}
+
+export { TYPES, typeOf, HttpError, escHtml, safeColor, json, readJson, fmtBytes, validKey, validPrefix, sanitizeName };

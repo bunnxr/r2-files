@@ -20,10 +20,6 @@ const CONFIG = {
   BUCKET: "fast",                                    // R2 bucket name
   REGION: "auto",                                    // leave as "auto" for R2
 
-  // ---- Limits
-  MAX_TOTAL_BYTES: 8 * 1024 ** 3,   // whole-bucket limit (uploads are refused beyond this)
-  MAX_FILE_BYTES: 5 * 1024 ** 3,    // per-file limit
-
   // ---- Upload behaviour
   CHUNK_SIZE: 50 * 1024 ** 2,       // multipart chunk size in bytes (min 5 MiB; raised automatically for huge files)
   PARALLEL_UPLOADS: 4,              // chunks uploaded at the same time per file
@@ -32,9 +28,8 @@ const CONFIG = {
 
   // ---- Look and feel
   SITE_TITLE: "My Files",           // shown in the header and browser tab
-  ACCENT: "#14b8a6",                // main accent colour (hex)
-  ACCENT_2: "#6366f1",              // second accent colour used in gradients (hex)
-  DEFAULT_VIEW: "grid",             // "grid" or "list" (the visitor's choice is remembered)
+  ACCENT: "#0d6efd",                // accent colour (hex): buttons, links, highlights
+  DEFAULT_VIEW: "list",             // "list" (table) or "grid" (cards); the visitor's choice is remembered
 
   // ---- Optional extra protection (leave empty to skip)
   ACCESS_TEAM_DOMAIN: "",           // e.g. "myteam.cloudflareaccess.com"; verifies the Access login token too
@@ -44,7 +39,7 @@ const CONFIG = {
 // ---------------------------------------------------------------------
 //  Config loading
 // ---------------------------------------------------------------------
-const NUM_KEYS = ["MAX_TOTAL_BYTES", "MAX_FILE_BYTES", "CHUNK_SIZE", "PARALLEL_UPLOADS", "CHUNK_RETRIES", "URL_EXPIRY_SECONDS"];
+const NUM_KEYS = ["CHUNK_SIZE", "PARALLEL_UPLOADS", "CHUNK_RETRIES", "URL_EXPIRY_SECONDS"];
 
 function getConfig(env) {
   const c = {};

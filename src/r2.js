@@ -1,5 +1,5 @@
 import { presign } from "./sigv4.js";
-import { HttpError, validKey } from "./util.js";
+import { HttpError, validKey, typeOf } from "./util.js";
 
 // Server-side call to R2 (uses a short-lived presigned URL). Always reads the body.
 async function r2(c, method, key, { query, headers, body } = {}) {
@@ -68,7 +68,17 @@ async function listAll(c, { prefix, delimiter, maxPages }) {
 // the Workers Free 50-subrequest limit; if the cap is hit the figure is a lower bound.
 async function bucketUsage(c) {
   const r = await listAll(c, { prefix: "", delimiter: "", maxPages: 40 });
-  return { used: r.files.reduce((s, f) => s + f.size, 0), count: r.files.length, partial: r.truncated };
+  const byType = {};
+  let count = 0;
+  for (const f of r.files) {
+    if (f.key.endsWith("/")) continue; // folder markers
+    count++;
+    const t = typeOf(f.key);
+    const e = byType[t] || (byType[t] = { count: 0, size: 0 });
+    e.count++;
+    e.size += f.size;
+  }
+  return { used: r.files.reduce((n, f) => n + f.size, 0), count, partial: r.truncated, byType, files: r.files };
 }
 
 async function uniqueKey(c, prefix, name) {
