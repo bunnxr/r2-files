@@ -1,5 +1,6 @@
+import { HAS_STREAMS, isZip, readZip, entryBlob, buildZip, mimeOf } from '/zip.js';
 // Settings (title, colours, upload tuning) come from the Worker's CONFIG via /api/config.
-let BOOT = { title: 'r2 by bunnxr', accent: '', parallel: 4, retries: 3, view: 'grid' };
+let BOOT = { title: 'Files', accent: '', parallel: 4, retries: 3, view: 'grid' };
 try { const r = await fetch('/api/config'); if (r.ok) BOOT = await r.json(); } catch (e) { /* keep defaults */ }
 document.title = BOOT.title;
 { const h1 = document.querySelector('.brand h1'); if (h1) h1.textContent = BOOT.title; }
@@ -7,7 +8,7 @@ if (BOOT.accent) document.documentElement.style.setProperty('--accent', BOOT.acc
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const ls = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { } } };
+const ls = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
 const fmt = (n) => { const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (i === 0 ? n : Math.round(n * 10) / 10) + ' ' + u[i]; };
 const fdate = (s) => (s ? new Date(s).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '');
 const CANCEL = new Error('Canceled');
@@ -52,7 +53,7 @@ const kindOf = (name) => { const e = name.indexOf('.') < 0 ? '' : name.split('.'
 const tile = (k, s) => '<span class="tile" style="--c:' + KC[k] + '">' + ico(GLYPH[k], s || 22) + '</span>';
 
 /* ---------- state ---------- */
-const S = { prefix: '', folders: [], files: [], shown: [], loading: true, error: '', q: '', by: 'name', dir: 1, view: ls.get('fm-view') || BOOT.view, seq: 0 };
+const S = { sel: new Set(), prefix: '', folders: [], files: [], shown: [], loading: true, error: '', q: '', by: 'name', dir: 1, view: ls.get('fm-view') || BOOT.view, seq: 0 };
 
 /* ---------- api / toast / modal ---------- */
 async function api(path, body) {
@@ -123,7 +124,7 @@ function readRoute() {
   const raw = location.hash.slice(1);
   if (raw.indexOf('view=') === 0) { const k = raw.slice(5); return { kind: KINDS.indexOf(k) >= 0 ? k : 'recent', prefix: '' }; }
   let h = '';
-  try { h = decodeURIComponent(raw); } catch (e) { }
+  try { h = decodeURIComponent(raw); } catch (e) {}
   if (h && !h.endsWith('/')) h += '/';
   return { kind: '', prefix: h };
 }
@@ -134,7 +135,7 @@ function setSort(by, dir) {
 }
 function applyRoute() {
   const r = readRoute();
-  S.kind = r.kind; S.prefix = r.prefix; S.q = ''; $('#q').value = '';
+  S.kind = r.kind; S.prefix = r.prefix; S.q = ''; $('#q').value = ''; S.sel.clear();
   if (S.kind) setSort('date', -1); else setSort('name', 1);
   load();
 }
@@ -198,14 +199,14 @@ function itemHtml(it, i) {
   acts += '<button class="ib" data-act="download" title="Download" aria-label="Download ' + esc(it.name) + '">' + ico('download', 17) + '</button>';
   acts += '<button class="ib danger" data-act="delete" title="Delete" aria-label="Delete ' + esc(it.name) + '">' + ico('trash', 17) + '</button>';
   const date = esc(fdate(it.modified));
-  return '<div class="item' + (pv ? ' go' : '') + '" data-i="' + i + '"><div class="main">' + tile(k, 20) + '<div class="nm"><b title="' + esc(it.key) + '">' + esc(it.name) + '</b>' + (it.dir ? '<small class="path">' + esc(it.dir) + '</small>' : '') + '<small class="sub"><span>' + fmt(it.size) + '</span><span>' + date + '</span></small></div></div><span class="sz">' + fmt(it.size) + '</span><span class="dt">' + date + '</span><div class="acts">' + acts + '</div></div>';
+  return '<div class="item' + (pv || isZip(it.name) ? ' go' : '') + '" data-i="' + i + '"><div class="main"><input type="checkbox" class="sel" data-sel aria-label="Select ' + esc(it.name) + '"' + (S.sel.has(it.key) ? ' checked' : '') + '>' + tile(k, 20) + '<div class="nm"><b title="' + esc(it.key) + '">' + esc(it.name) + '</b>' + (it.dir ? '<small class="path">' + esc(it.dir) + '</small>' : '') + '<small class="sub"><span>' + fmt(it.size) + '</span><span>' + date + '</span></small></div></div><span class="sz">' + fmt(it.size) + '</span><span class="dt">' + date + '</span><div class="acts">' + acts + '</div></div>';
 }
 function folderHtml(f, i) {
   return '<div class="fcard" data-f="' + i + '"><div class="f-top">' + tile('folder', 22) + '<button class="ib danger" data-act="delete" title="Delete folder" aria-label="Delete folder ' + esc(f.name) + '">' + ico('trash', 17) + '</button></div><b title="' + esc(f.name) + '">' + esc(f.name) + '</b><small>Folder</small></div>';
 }
 function theadHtml() {
   const a = (k) => (S.by === k ? (S.dir > 0 ? ' ↑' : ' ↓') : '');
-  return '<div class="thead"><span data-sort="name">Name' + a('name') + '</span><span data-sort="size">Size' + a('size') + '</span><span data-sort="date">Modified' + a('date') + '</span><span></span></div>';
+  return '<div class="thead"><span class="th-n"><input type="checkbox" class="sel" data-selall aria-label="Select all"><span data-sort="name">Name' + a('name') + '</span></span><span data-sort="size">Size' + a('size') + '</span><span data-sort="date">Modified' + a('date') + '</span><span></span></div>';
 }
 
 function renderCrumbs() {
@@ -244,6 +245,8 @@ function render() {
     list.innerHTML = '<div class="empty"><h3>Could not load this view</h3><p>' + esc(S.error) + '</p><button class="btn primary" data-act="retry">Try again</button></div>';
     return;
   }
+  const have = new Set(S.files.map((f) => f.key));
+  S.sel.forEach((k) => { if (!have.has(k)) S.sel.delete(k); });
   const v = filtered();
   S.shown = v.files; S.shownFolders = v.folders;
   $('#folderSec').hidden = !v.folders.length;
@@ -256,6 +259,7 @@ function render() {
   const total = S.folders.length + S.total;
   const shown = v.folders.length + v.files.length;
   $('#count').textContent = S.q ? shown + ' of ' + total + ' items' : total + (total === 1 ? ' item' : ' items');
+  renderSel();
 }
 
 $('#q').addEventListener('input', (e) => { S.q = e.target.value; render(); });
@@ -268,14 +272,16 @@ $('#folders').addEventListener('click', (e) => {
   if (e.target.closest('[data-act=delete]')) del(f); else go(f.key);
 });
 $('#list').addEventListener('click', (e) => {
+  if (e.target.closest('[data-selall]')) { selectAll(e.target.checked); return; }
   const s = e.target.closest('[data-sort]');
   if (s) { const k = s.dataset.sort; if (S.by === k) setSort(k, -S.dir); else setSort(k, k === 'date' ? -1 : 1); render(); return; }
   const act = e.target.closest('[data-act]');
   if (act && act.dataset.act === 'retry') { load(); return; }
   const row = e.target.closest('[data-i]'); if (!row) return;
   const it = S.shown[+row.dataset.i]; if (!it) return;
+  if (e.target.closest('[data-sel]')) { toggleSel(it.key, e.target.checked); return; }
   if (act) { const a = act.dataset.act; if (a === 'download') download(it); else if (a === 'delete') del(it); else if (a === 'preview') preview(it); return; }
-  if (PREV[kindOf(it.name)]) preview(it);
+  if (PREV[kindOf(it.name)]) preview(it); else if (isZip(it.name)) openArchive(it);
 });
 
 /* ---------- download / preview / delete / new folder ---------- */
@@ -298,8 +304,8 @@ async function preview(it) {
     const u = esc(r.url);
     box.innerHTML = k === 'image' ? '<img src="' + u + '" alt="' + esc(it.name) + '">'
       : k === 'video' ? '<video src="' + u + '" controls playsinline autoplay></video>'
-        : k === 'audio' ? '<audio src="' + u + '" controls autoplay></audio>'
-          : '<iframe src="' + u + '" title="' + esc(it.name) + '"></iframe>';
+      : k === 'audio' ? '<audio src="' + u + '" controls autoplay></audio>'
+      : '<iframe src="' + u + '" title="' + esc(it.name) + '"></iframe>';
     if (k === 'pdf') { const dl = $('[data-x=dl]', modalEl); if (dl) dl.insertAdjacentHTML('beforebegin', '<a class="btn" href="' + u + '" target="_blank" rel="noopener">Open</a>'); }
   } catch (e) { closeModal(); toast(e.message, 'err'); }
 }
@@ -311,7 +317,7 @@ async function del(it) {
   try {
     if (isF) {
       let n = 0;
-      for (; ;) { const r = await api('/api/delete-folder', { prefix: it.key }); if (!r.deleted) break; n += r.deleted; t.set('Deleting… ' + n + ' items removed'); }
+      for (;;) { const r = await api('/api/delete-folder', { prefix: it.key }); if (!r.deleted) break; n += r.deleted; t.set('Deleting… ' + n + ' items removed'); }
     } else await api('/api/delete', { key: it.key });
     t.close(); toast('Deleted “' + it.name + '”', 'ok');
   } catch (e) { t.close(); toast(e.message, 'err'); }
@@ -329,9 +335,9 @@ const queue = [];
 let uid = 0, running = false;
 const getLoaded = (it) => (it.state === 'done' ? it.size : it.got ? Math.min(it.size, it.got.reduce((a, v) => a + v, 0)) : 0);
 
-function enqueue(entries) {
+function enqueue(entries, prefixOverride) {
   if (!entries.length) return;
-  const prefix = S.prefix;
+  const prefix = prefixOverride !== undefined ? prefixOverride : S.prefix;
   entries.forEach((en) => queue.push({ id: ++uid, file: en.file, name: en.file.name, size: en.file.size, prefix: prefix, rel: en.rel || '', state: 'queued', got: null, speed: 0, samples: [], xhrs: new Set(), error: '' }));
   $('#uploads').classList.remove('min');
   renderUploads(); pump();
@@ -339,7 +345,7 @@ function enqueue(entries) {
 async function pump() {
   if (running) return;
   running = true;
-  for (; ;) {
+  for (;;) {
     const it = queue.find((i) => i.state === 'queued');
     if (!it) break;
     await uploadFile(it);
@@ -417,7 +423,7 @@ async function uploadFile(it) {
     } else if (it.canceled) throw CANCEL;
     it.state = 'done';
   } catch (e) {
-    if (init && init.uploadId) api('/api/upload/abort', { key: init.key, uploadId: init.uploadId }).catch(() => { });
+    if (init && init.uploadId) api('/api/upload/abort', { key: init.key, uploadId: init.uploadId }).catch(() => {});
     if (it.canceled || e === CANCEL) it.state = 'canceled';
     else { it.state = 'error'; it.error = e.message || 'Upload failed'; }
   }
@@ -436,7 +442,7 @@ function renderUploads() {
   $('#upList').innerHTML = queue.map((it) => {
     const btn = it.state === 'queued' || it.state === 'uploading' ? '<button class="ib" data-u="cancel" title="Cancel" aria-label="Cancel upload">' + ico('x', 16) + '</button>'
       : it.state === 'done' ? '<span class="u-ok">' + ico('check', 18) + '</span>'
-        : '<button class="ib" data-u="retry" title="Try again" aria-label="Try again">' + ico('retry', 16) + '</button>';
+      : '<button class="ib" data-u="retry" title="Try again" aria-label="Try again">' + ico('retry', 16) + '</button>';
     return '<div class="u-item ' + it.state + '" data-id="' + it.id + '"><div class="u-row"><span class="u-name" title="' + esc(it.name) + '">' + esc(it.name) + '</span>' + btn + '</div><div class="meter sm"><i data-b></i></div><small data-m></small></div>';
   }).join('');
   paintUploads();
@@ -461,9 +467,9 @@ function paintUploads() {
     $('[data-b]', row).style.width = (it.state === 'done' ? 100 : pct) + '%';
     $('[data-m]', row).textContent =
       it.state === 'queued' ? 'Waiting, ' + fmt(it.size)
-        : it.state === 'uploading' ? Math.floor(pct) + '%, ' + fmt(loaded) + ' of ' + fmt(it.size) + (it.speed > 0 ? ', ' + fmt(it.speed) + '/s' : '')
-          : it.state === 'done' ? 'Uploaded, ' + fmt(it.size)
-            : it.state === 'canceled' ? 'Canceled' : it.error;
+      : it.state === 'uploading' ? Math.floor(pct) + '%, ' + fmt(loaded) + ' of ' + fmt(it.size) + (it.speed > 0 ? ', ' + fmt(it.speed) + '/s' : '')
+      : it.state === 'done' ? 'Uploaded, ' + fmt(it.size)
+      : it.state === 'canceled' ? 'Canceled' : it.error;
   });
   const pct = tot ? (got / tot) * 100 : 0;
   $('#upBar').style.width = pct + '%';
@@ -480,7 +486,7 @@ $('#upList').addEventListener('click', (e) => {
 });
 $('#upToggle').onclick = () => { const m = $('#uploads').classList.toggle('min'); $('#upToggle').innerHTML = ico(m ? 'up' : 'down', 18); };
 $('#upClear').onclick = () => { for (let i = queue.length - 1; i >= 0; i--) if (['done', 'canceled', 'error'].indexOf(queue[i].state) >= 0) queue.splice(i, 1); renderUploads(); };
-window.addEventListener('beforeunload', (e) => { if (queue.some((i) => i.state === 'uploading' || i.state === 'queued')) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', (e) => { if (job || queue.some((i) => i.state === 'uploading' || i.state === 'queued')) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- picking and dropping files ---------- */
 $('#file').addEventListener('change', (e) => { enqueue(Array.from(e.target.files).map((f) => ({ file: f, rel: '' }))); e.target.value = ''; });
@@ -489,7 +495,7 @@ async function walk(entry, path, out) {
     if (entry.isFile) { const f = await new Promise((res, rej) => entry.file(res, rej)); out.push({ file: f, rel: path }); }
     else if (entry.isDirectory) {
       const rd = entry.createReader(); let all = [];
-      for (; ;) { const b = await new Promise((res, rej) => rd.readEntries(res, rej)); if (!b.length) break; all = all.concat(Array.from(b)); }
+      for (;;) { const b = await new Promise((res, rej) => rd.readEntries(res, rej)); if (!b.length) break; all = all.concat(Array.from(b)); }
       for (const en of all) await walk(en, path + entry.name + '/', out);
     }
   } catch (e) { /* skip unreadable entries */ }
@@ -509,6 +515,206 @@ window.addEventListener('drop', async (e) => {
   if (ents.length) { const out = []; for (const en of ents) await walk(en, '', out); enqueue(out); }
   else enqueue(files.map((f) => ({ file: f, rel: '' })));
 });
+
+/* ---------- selection, archives (browse / extract) and "zip selected" ---------- */
+function renderSel() {
+  const n = S.sel.size;
+  $('#selbar').hidden = !n;
+  if (n) { let sz = 0; S.files.forEach((f) => { if (S.sel.has(f.key)) sz += f.size; }); $('#selCount').textContent = n + (n === 1 ? ' file selected' : ' files selected') + ' (' + fmt(sz) + ')'; }
+  const all = $('[data-selall]');
+  if (all) { const c = S.shown.filter((f) => S.sel.has(f.key)).length; all.checked = c > 0 && c === S.shown.length; all.indeterminate = c > 0 && c < S.shown.length; }
+}
+function toggleSel(key, on) { if (on) S.sel.add(key); else S.sel.delete(key); renderSel(); }
+function selectAll(on) {
+  S.shown.forEach((f) => { if (on) S.sel.add(f.key); else S.sel.delete(f.key); });
+  document.querySelectorAll('#list [data-sel]').forEach((cb) => { cb.checked = on; });
+  renderSel();
+}
+$('#selClear').onclick = () => { S.sel.clear(); document.querySelectorAll('#list [data-sel]').forEach((cb) => { cb.checked = false; }); renderSel(); };
+$('#selZip').onclick = () => zipSelected();
+
+let job = null;
+function startJob(title) {
+  if (job) { toast('Another task is still running.', 'info'); return null; }
+  job = { canceled: false };
+  $('#jobTitle').textContent = title; $('#jobSub').textContent = 'Starting…'; $('#jobBar').style.width = '0%'; $('#job').hidden = false;
+  return job;
+}
+function updateJob(sub, pct) { $('#jobSub').textContent = sub; if (pct != null) $('#jobBar').style.width = pct + '%'; }
+function endJob() { job = null; $('#job').hidden = true; }
+$('#jobCancel').onclick = () => { if (job) { job.canceled = true; $('#jobSub').textContent = 'Canceling…'; } };
+
+function askName(title, desc, def, label) {
+  return new Promise((resolve) => {
+    let val = null;
+    openModal('<form class="dlg" role="dialog" aria-modal="true"><h2>' + esc(title) + '</h2><p>' + esc(desc) + '</p><input id="fn" class="field" maxlength="120" value="' + esc(def) + '" autocomplete="off"><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">' + esc(label) + '</button></div></form>', () => resolve(val));
+    const inp = $('#fn'); inp.focus(); inp.select();
+    $('form', modalEl).onsubmit = (e) => { e.preventDefault(); const v = inp.value.trim(); if (!v) { inp.focus(); return; } val = v; closeModal(); };
+    modalEl.onclick = (e) => { if (e.target.closest('[data-x=no]')) closeModal(); };
+  });
+}
+function saveBlob(blob, name) {
+  const u = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = u; a.download = name; a.style.display = 'none';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 60000);
+}
+
+/* --- zip selected --- */
+async function zipSelected() {
+  const chosen = S.files.filter((f) => S.sel.has(f.key));
+  if (!chosen.length) return;
+  if (!HAS_STREAMS) { toast('Your browser is too old for zipping (needs Chrome 103, Safari 16.4 or Firefox 113 or newer).', 'err'); return; }
+  const prefix = S.prefix;
+  const name = await askName('Zip selected files', 'The zip will be saved in ' + (prefix ? '/' + prefix : 'the top level') + '.', 'archive.zip', 'Create zip');
+  if (!name) return;
+  const zname = /\.zip$/i.test(name) ? name : name + '.zip';
+  const j = startJob('Creating ' + zname);
+  if (!j) return;
+  try {
+    const items = chosen.map((f) => ({ zipName: S.kind ? f.key : f.name, size: f.size, modified: f.modified, getUrl: async () => (await api('/api/url', { key: f.key, mode: 'download' })).url }));
+    const blob = await buildZip(items, { canceled: () => j.canceled, onProgress: (read, total, i, nm) => updateJob((i + 1) + ' of ' + items.length + ': ' + nm, Math.min(99, total ? (read / total) * 100 : 0)) });
+    enqueue([{ file: new File([blob], zname, { type: 'application/zip' }), rel: '' }], prefix);
+    S.sel.clear(); document.querySelectorAll('#list [data-sel]').forEach((cb) => { cb.checked = false; }); renderSel();
+    toast('Zip ready. Uploading ' + zname + '…', 'ok');
+  } catch (e) { if (!j.canceled) toast(e.message, 'err'); }
+  endJob();
+}
+
+/* --- browse an archive --- */
+let arc = null;
+const nameCmp = (a, b) => (a.name || a.base).localeCompare(b.name || b.base, undefined, { numeric: true, sensitivity: 'base' });
+async function arcUrl(A) {
+  if (Date.now() - A.t > 40 * 60000) { A.url = (await api('/api/url', { key: A.it.key, mode: 'download' })).url; A.t = Date.now(); }
+  return A.url;
+}
+function arcChildren(A, dir) {
+  const folders = new Map(), files = [];
+  A.entries.forEach((e, i) => {
+    if (e.path.indexOf(dir) !== 0) return;
+    const rest = e.path.slice(dir.length);
+    if (!rest) return;
+    const k = rest.indexOf('/');
+    if (k < 0) { if (!e.dir) files.push(i); return; }
+    const n = rest.slice(0, k);
+    const f = folders.get(n) || { name: n, count: 0, size: 0 };
+    if (!e.dir) { f.count++; f.size += e.usize; }
+    folders.set(n, f);
+  });
+  return { folders: Array.from(folders.values()).sort(nameCmp), files: files.sort((a, b) => nameCmp(A.entries[a], A.entries[b])) };
+}
+function arcUnder(A, prefix) { const r = []; A.entries.forEach((e, i) => { if (!e.dir && !e.bad && e.path.indexOf(prefix) === 0) r.push(i); }); return r; }
+function arcRow(A, i) {
+  const e = A.entries[i], k = kindOf(e.base);
+  const pv = PREV[k] && !e.bad && e.usize <= 500 * 1048576;
+  let acts = '';
+  if (!e.bad) {
+    if (pv) acts += '<button class="ib" data-aa="preview" title="Preview" aria-label="Preview ' + esc(e.base) + '">' + ico('eye', 17) + '</button>';
+    acts += '<button class="ib" data-aa="download" title="Download" aria-label="Download ' + esc(e.base) + '">' + ico('download', 17) + '</button>';
+  }
+  return '<div class="arow" data-ai="' + i + '"><input type="checkbox" class="sel" data-asel aria-label="Select ' + esc(e.base) + '"' + (A.sel.has(i) ? ' checked' : '') + (e.bad ? ' disabled' : '') + '><div class="main">' + tile(k, 18) + '<div class="nm"><b title="' + esc(e.path) + '">' + esc(e.base) + '</b><small class="sub">' + (e.bad ? esc(e.reason) : fmt(e.usize)) + '</small></div></div><span class="sz">' + (e.bad ? esc(e.reason) : fmt(e.usize)) + '</span><span class="dt">' + esc(fdate(e.date)) + '</span><div class="acts">' + acts + '</div></div>';
+}
+function arcFolderRow(A, f) {
+  const pre = A.dir + f.name + '/', idx = arcUnder(A, pre);
+  const all = idx.length > 0 && idx.every((i) => A.sel.has(i));
+  return '<div class="arow" data-af="' + esc(pre) + '"><input type="checkbox" class="sel" data-fsel aria-label="Select folder ' + esc(f.name) + '"' + (all ? ' checked' : '') + (idx.length ? '' : ' disabled') + '><div class="main">' + tile('folder', 18) + '<div class="nm"><b>' + esc(f.name) + '</b><small class="sub">' + f.count + (f.count === 1 ? ' file' : ' files') + '</small></div></div><span class="sz">' + fmt(f.size) + '</span><span class="dt"></span><div class="acts"></div></div>';
+}
+function renderArc() {
+  const A = arc; if (!A) return;
+  const old = $('#arcList'), top = old ? old.scrollTop : 0;
+  const files = A.entries.filter((e) => !e.dir && !e.bad);
+  const total = files.reduce((n, e) => n + e.usize, 0), nSel = A.sel.size;
+  let crumbs, body = '';
+  if (A.view) {
+    crumbs = '<a data-x="back">&larr; Back to list</a><b>' + esc(A.view.name) + '</b>';
+    body = '<div class="arc-view">' + A.view.html + '</div>';
+  } else {
+    crumbs = '<a data-d="">' + esc(A.it.name) + '</a>';
+    let acc = '';
+    A.dir.split('/').filter(Boolean).forEach((p) => { acc += p + '/'; crumbs += '<span class="sep">' + ico('chev', 14) + '</span><a data-d="' + esc(acc) + '">' + esc(p) + '</a>'; });
+    const ch = arcChildren(A, A.dir);
+    body = ch.folders.map((f) => arcFolderRow(A, f)).join('') + ch.files.map((i) => arcRow(A, i)).join('');
+    if (!body) body = '<div class="empty"><p>This archive is empty.</p></div>';
+  }
+  modalEl.innerHTML = '<div class="pv arc" role="dialog" aria-modal="true"><div class="pv-h"><b>' + esc(A.it.name) + '</b><button class="btn primary" data-x="extract"' + (files.length ? '' : ' disabled') + '>' + (nSel ? 'Extract selected (' + nSel + ')' : 'Extract all here') + '</button><button class="ib" data-x="close" aria-label="Close">' + ico('x', 18) + '</button></div><div class="arc-bar"><div class="arc-crumbs">' + crumbs + '</div>' + (A.view ? '' : '<label class="arc-all"><input type="checkbox" class="sel" data-aall' + (files.length && nSel === files.length ? ' checked' : '') + '> Select all</label><span>' + files.length + (files.length === 1 ? ' file, ' : ' files, ') + fmt(total) + '</span>') + '</div><div class="arc-list" id="arcList">' + body + '</div></div>';
+  $('#arcList').scrollTop = top;
+}
+function arcBack() { const A = arc; if (!A || !A.view) return; URL.revokeObjectURL(A.view.url); A.view = null; renderArc(); }
+function showArc() {
+  openModal('', () => { if (arc && arc.view) URL.revokeObjectURL(arc.view.url); arc = null; });
+  modalEl.onclick = arcClick;
+  renderArc();
+}
+function arcClick(e) {
+  const A = arc; if (!A) return;
+  const x = e.target.closest('[data-x]');
+  if (x) { const a = x.dataset.x; if (a === 'close') closeModal(); else if (a === 'back') arcBack(); else if (a === 'extract') arcExtract(); return; }
+  const d = e.target.closest('[data-d]');
+  if (d) { A.dir = d.dataset.d; renderArc(); $('#arcList').scrollTop = 0; return; }
+  if (e.target.closest('[data-aall]')) { A.sel.clear(); if (e.target.checked) A.entries.forEach((en, i) => { if (!en.dir && !en.bad) A.sel.add(i); }); renderArc(); return; }
+  const fs = e.target.closest('[data-fsel]');
+  if (fs) { arcUnder(A, fs.closest('[data-af]').dataset.af).forEach((i) => { if (fs.checked) A.sel.add(i); else A.sel.delete(i); }); renderArc(); return; }
+  const row = e.target.closest('[data-ai]');
+  if (row) {
+    const i = +row.dataset.ai, aa = e.target.closest('[data-aa]');
+    if (e.target.closest('[data-asel]')) { if (e.target.checked) A.sel.add(i); else A.sel.delete(i); renderArc(); return; }
+    if (aa) arcOpen(A, A.entries[i], aa.dataset.aa);
+    return;
+  }
+  const fr = e.target.closest('[data-af]');
+  if (fr) { A.dir = fr.dataset.af; renderArc(); $('#arcList').scrollTop = 0; }
+}
+async function openArchive(it) {
+  if (!HAS_STREAMS) { toast('Your browser is too old to open archives (needs Chrome 103, Safari 16.4 or Firefox 113 or newer).', 'err'); return; }
+  openModal('<div class="pv"><div class="pv-b"><div class="spin"></div></div></div>');
+  try {
+    const r = await api('/api/url', { key: it.key, mode: 'download' });
+    const entries = await readZip(r.url, it.size);
+    arc = { it, url: r.url, t: Date.now(), entries, dir: '', sel: new Set(), view: null };
+    showArc();
+  } catch (e) { closeModal(); toast(e.message, 'err'); }
+}
+async function arcOpen(A, e, mode) {
+  const t = toast((mode === 'preview' ? 'Opening ' : 'Preparing ') + e.base + '…', 'info', 0);
+  try {
+    const blob = await entryBlob(await arcUrl(A), e, mimeOf(e.path));
+    t.close();
+    if (mode === 'download') { saveBlob(blob, e.base); return; }
+    if (arc !== A) return;
+    const u = URL.createObjectURL(blob), k = kindOf(e.base);
+    A.view = { name: e.path, url: u, html: k === 'image' ? '<img src="' + u + '" alt="">' : k === 'video' ? '<video src="' + u + '" controls playsinline autoplay></video>' : k === 'audio' ? '<audio src="' + u + '" controls autoplay></audio>' : '<iframe src="' + u + '" title="' + esc(e.base) + '"></iframe>' };
+    renderArc();
+  } catch (err) { t.close(); toast(err.message, 'err'); }
+}
+
+/* --- extract here: sends the files to the normal uploader, a couple at a time --- */
+async function arcExtract() {
+  const A = arc; if (!A) return;
+  const idx = A.sel.size ? Array.from(A.sel).sort((a, b) => a - b) : A.entries.map((e, i) => i).filter((i) => !A.entries[i].dir && !A.entries[i].bad);
+  const list = idx.map((i) => A.entries[i]);
+  if (!list.length) return;
+  const dest = A.it.key.slice(0, A.it.key.lastIndexOf('/') + 1);
+  const size = list.reduce((n, e) => n + e.usize, 0);
+  const ok = await confirmDlg('Extract here?', 'Extract ' + list.length + (list.length === 1 ? ' file' : ' files') + ' (' + fmt(size) + ') into ' + (dest ? '/' + dest : 'the top level') + '? Folder structure is kept and existing files are never overwritten.', 'Extract');
+  if (!ok) { showArc(); return; }
+  arc = null;
+  const j = startJob('Extracting ' + A.it.name);
+  if (!j) return;
+  let done = 0;
+  try {
+    for (const e of list) {
+      while (!j.canceled && queue.filter((q) => q.state === 'queued').length >= 2) await sleep(300);
+      if (j.canceled) break;
+      updateJob((done + 1) + ' of ' + list.length + ': ' + e.path, (done / list.length) * 100);
+      const blob = await entryBlob(await arcUrl(A), e, mimeOf(e.path));
+      const parts = e.path.split('/'), base = parts.pop();
+      enqueue([{ file: new File([blob], base, { type: blob.type }), rel: parts.join('/') }], dest);
+      done++;
+    }
+    toast(j.canceled ? 'Extraction canceled after ' + done + ' files.' : 'Extracted ' + done + (done === 1 ? ' file' : ' files') + '. Uploads continue in the panel.', j.canceled ? 'info' : 'ok');
+  } catch (err) { toast('Extraction stopped: ' + err.message, 'err'); }
+  endJob();
+}
 
 /* ---------- start ---------- */
 applyView();
