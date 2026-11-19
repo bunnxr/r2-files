@@ -30,10 +30,8 @@ main{min-width:0}
 .btn.danger{background:var(--danger);border-color:var(--danger);color:#fff}
 .btn.block{width:100%}
 .btn.sq{width:38px;padding:0}
-.btn.sm{height:30px;padding:0 10px;font-size:12.5px;gap:6px;border-radius:7px}
-.btn.sm svg,.btns .btn svg{width:15px;height:15px}
-.btns{display:flex;flex-direction:column;gap:6px}
-.btns .btn{height:30px;padding:0 10px;font-size:12.5px;gap:6px;border-radius:7px}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btns .btn{height:38px;padding:0 8px;font-size:13px;gap:6px;width:100%}
 .ib{width:32px;height:32px;display:grid;place-items:center;border-radius:8px;border:0;background:transparent;color:var(--muted);transition:background .15s,color .15s}
 .ib:hover{background:var(--hover);color:var(--text)}
 .ib.danger:hover{color:var(--danger)}
@@ -239,9 +237,6 @@ main{min-width:0}
  .navcard{order:1;padding:12px}
  main{order:2}
  .store{order:3}
- .btns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
- .btns>:first-child{grid-column:1/-1;height:32px;font-size:12.5px}
- .btns>:not(:first-child){flex-direction:column;gap:2px;height:42px;padding:0 4px;font-size:11px}
  .side h3{display:none}
  .nav{flex-direction:row;gap:8px;margin:12px -12px 0;padding:0 12px 2px;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:none}
  .nav::-webkit-scrollbar{display:none}
@@ -255,9 +250,7 @@ main{min-width:0}
  .topbar{padding:calc(10px + env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 0 max(12px,env(safe-area-inset-left))}
  .layout{margin-top:10px;padding:0 max(12px,env(safe-area-inset-right)) calc(96px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
  .btn{height:44px}
- .btns .btn{height:auto}
- .btns>:first-child{height:32px}
- .btns>:not(:first-child){height:42px}
+ .btns .btn{height:44px}
  .ib{width:40px;height:40px}
  .searchbar{height:46px;margin-bottom:12px}
  .searchbar input,.field{font-size:16px}
