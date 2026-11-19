@@ -598,7 +598,7 @@ async function zipSelected(toDevice) {
   const j = startJob('Creating ' + zname);
   if (!j) return;
   try {
-    const items = chosen.map((f) => ({ zipName: S.kind ? f.key : f.name, size: f.size, modified: f.modified, getUrl: async () => (await api('/api/url', { key: f.key, mode: 'download' })).url }));
+    const items = chosen.map((f) => ({ zipName: S.kind ? f.key : f.name, size: f.size, modified: f.modified, getUrl: async () => '/api/read?key=' + encodeURIComponent(f.key) }));
     const blob = await buildZip(items, { canceled: () => j.canceled, onProgress: (read, total, i, nm) => updateJob((i + 1) + ' of ' + items.length + ': ' + nm, Math.min(99, total ? (read / total) * 100 : 0)) });
     if (toDevice) saveBlob(blob, zname); else enqueue([{ file: new File([blob], zname, { type: 'application/zip' }), rel: '' }], prefix);
     if (!toDevice) { S.sel.clear(); document.querySelectorAll('#list [data-sel]').forEach((cb) => { cb.checked = false; }); renderSel(); }
@@ -610,11 +610,7 @@ async function zipSelected(toDevice) {
 /* --- browse an archive --- */
 let arc = null;
 const nameCmp = (a, b) => (a.name || a.base).localeCompare(b.name || b.base, undefined, { numeric: true, sensitivity: 'base' });
-async function arcUrl(A) {
-  // Public host URLs never expire; presigned R2 URLs need refreshing after ~40 min
-  if (!BOOT.publicHost && Date.now() - A.t > 40 * 60000) { A.url = (await api('/api/url', { key: A.it.key, mode: 'download' })).url; A.t = Date.now(); }
-  return A.url;
-}
+async function arcUrl(A) { return A.url; }
 function arcChildren(A, dir) {
   const folders = new Map(), files = [];
   A.entries.forEach((e, i) => {
@@ -695,8 +691,7 @@ async function openArchive(it) {
   if (!HAS_STREAMS) { toast('Your browser is too old to open archives (needs Chrome 103, Safari 16.4 or Firefox 113 or newer).', 'err'); return; }
   openModal('<div class="pv"><div class="pv-b"><div class="spin"></div></div></div>');
   try {
-    // Use the public host URL (Worker-proxied, CORS-safe) when available; fall back to presigned R2 URL.
-    const url = BOOT.publicHost ? publicUrl(it.key) : (await api('/api/url', { key: it.key, mode: 'download' })).url;
+    const url = '/api/read?key=' + encodeURIComponent(it.key);
     const entries = await readZip(url, it.size);
     arc = { it, url, t: Date.now(), entries, dir: '', sel: new Set(), view: null };
     showArc();
@@ -887,24 +882,29 @@ async function moveFiles(list, mode) {
 }
 
 /* --- share links --- */
-function openShare(it) {
-  const pub = isPublicKey(it.key);
-  const hasPublicHost = !!BOOT.publicHost;
+async function openShare(it) {
+  const pub = isPublicKey(it.key), host = !!BOOT.publicHost;
   openModal('<div class="dlg" role="dialog" aria-modal="true"><h2>Share “' + esc(it.name) + '”</h2>' +
-    (pub ? '<span class="lbl2">Public link</span><button class="btn primary block" data-s="public">' + ico('globe', 17) + ' Copy public link</button><small class="hint">Anyone with this link can open the file. It never expires.</small>' : '') +
-    (hasPublicHost && !pub ? '<span class="lbl2">Permanent link</span><button class="btn primary block" data-s="permanent">' + ico('link', 17) + ' Copy permanent link</button><small class="hint">Direct short link — works forever.</small>' : '') +
-    '<span class="lbl2">Expiring link</span><div class="seg3"><button class="btn" data-s="3600">1 hour</button><button class="btn" data-s="86400">1 day</button><button class="btn" data-s="604800">7 days</button></div>' +
-    '<input id="shLink" class="field" readonly hidden><small class="hint" id="shNote">Pick how long the link should work. It is copied for you.</small><div class="dlg-acts"><button class="btn" data-x="no">Close</button></div></div>');
-  const show = async (url, note) => { const f = $('#shLink'); f.value = url; f.hidden = false; f.select(); const ok = await copyText(url); const n = $('#shNote'); if (n) n.textContent = (ok ? 'Copied. ' : 'Copy the link above. ') + note; };
+    (pub ? '<span class="lbl2">Public folder link</span><button class="btn primary block" data-s="public">' + ico('globe', 17) + ' Copy public link</button>' : '') +
+    '<span class="lbl2">' + (host ? 'Short link' : 'Expiring link') + '</span><div class="seg4"><button class="btn" data-s="3600">1 hour</button><button class="btn" data-s="86400">1 day</button><button class="btn" data-s="604800">7 days</button>' + (host ? '<button class="btn" data-s="0">Never expires</button>' : '') + '</div>' +
+    '<div class="copyrow" id="shRow" hidden><input id="shLink" class="field" readonly><button class="btn" data-c="1">Copy</button></div>' +
+    '<small class="hint" id="shNote">' + (host ? 'The address stays the same whatever you pick; only how long it works changes.' : 'Pick how long the link should work. It is copied for you.') + '</small>' +
+    '<div class="dlg-acts"><button class="btn danger" id="shRemove" data-rm="1" hidden>Remove link</button><button class="btn" data-x="no">Close</button></div></div>');
+  const note = (t) => { const n = $('#shNote'); if (n) n.textContent = t; };
+  const when = (exp) => (exp ? 'Works until ' + new Date(exp * 1000).toLocaleString() + '.' : 'Never expires.');
+  const show = async (url, text, copy) => { if (!$('#shRow')) return; $('#shRow').hidden = false; const f = $('#shLink'); f.value = url; f.select(); const ok = copy ? await copyText(url) : false; note((ok ? 'Copied. ' : '') + text); };
+  if (host) api('/api/link-info', { key: it.key }).then((i) => { if (i.exists && $('#shRow')) { show(i.url, i.active ? 'Current link. ' + when(i.exp) : 'This link has expired. Pick a length to turn it on again.', false); if (i.active) $('#shRemove').hidden = false; } }).catch(() => {});
   modalEl.onclick = async (e) => {
     if (e.target.closest('[data-x]')) { closeModal(); return; }
+    if (e.target.closest('[data-c]')) { const ok = await copyText($('#shLink').value); toast(ok ? 'Copied' : 'Press and hold the link to copy it', ok ? 'ok' : 'info'); return; }
+    if (e.target.closest('[data-rm]')) { try { await api('/api/link-remove', { key: it.key }); $('#shRow').hidden = true; $('#shRemove').hidden = true; note('Link removed. It no longer works.'); } catch (err) { toast(err.message, 'err'); } return; }
     const b = e.target.closest('[data-s]');
     if (!b) return;
     try {
-      if (b.dataset.s === 'public') return show(publicUrl(it.key), 'Anyone can open it.');
-      if (b.dataset.s === 'permanent') return show('https://' + BOOT.publicHost + '/' + it.key.split('/').map(encodeURIComponent).join('/'), 'This link works forever.');
-      const r = await api('/api/share', { key: it.key, seconds: +b.dataset.s });
-      show(r.url, 'It works until ' + new Date(r.expires * 1000).toLocaleString() + '.');
+      if (b.dataset.s === 'public') return show(publicUrl(it.key), 'Anyone can open it. It never expires.', true);
+      const r = await api(host ? '/api/link' : '/api/share', { key: it.key, seconds: +b.dataset.s });
+      if (host && $('#shRemove')) $('#shRemove').hidden = false;
+      show(r.url, when(r.exp), true);
     } catch (err) { toast(err.message, 'err'); }
   };
 }
@@ -991,7 +991,7 @@ async function showViewer() {
     if (!V || my !== V.seq) return;
     const u = esc(r.url);
     if (asText) {
-      const res = await fetch(r.url, { headers: { Range: 'bytes=0-' + (MAXTXT - 1) } });
+      const res = await fetch('/api/read?key=' + encodeURIComponent(cur.key), { headers: { Range: 'bytes=0-' + (MAXTXT - 1) } });
       if (!res.ok) throw new Error('Could not read the file (HTTP ' + res.status + ').');
       const t = await res.text();
       if (!V || my !== V.seq) return;

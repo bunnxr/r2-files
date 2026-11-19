@@ -16,7 +16,7 @@ const L1 = new TextDecoder('windows-1252');
 async function range(url, a, b) {
   let r;
   try { r = await fetch(url, { headers: { Range: 'bytes=' + a + '-' + b } }); }
-  catch (e) { throw new Error('Could not read the file from R2. Check that the bucket CORS policy allows GET with all headers.'); }
+  catch (e) { throw new Error('Could not read the file. Check your connection and try again.'); }
   if (r.status !== 206 && r.status !== 200) throw new Error('R2 answered with HTTP ' + r.status + ' while reading the archive.');
   return r;
 }

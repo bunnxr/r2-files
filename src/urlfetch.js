@@ -33,7 +33,7 @@ function nameFor(u, res, wanted) {
 export function fetchToR2(c, ctx, b) {
   const u = checkUrl(b.url);
   const prefix = typeof b.prefix === "string" ? b.prefix : "";
-  if (!validPrefix(prefix) || prefix.startsWith(".trash/")) throw new HttpError(400, "Invalid destination folder.");
+  if (!validPrefix(prefix) || prefix.startsWith(".trash/") || prefix.startsWith(".links/")) throw new HttpError(400, "Invalid destination folder.");
 
   const { readable, writable } = new TransformStream();
   const w = writable.getWriter();

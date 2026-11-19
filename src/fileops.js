@@ -14,7 +14,7 @@ const items = (v, max) => {
 };
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 const okId = (s) => typeof s === "string" && /^[a-z0-9]{4,20}$/.test(s);
-const fileKey = (k) => validKey(k, "file") && !k.startsWith(".trash/");
+const fileKey = (k) => validKey(k, "file") && !k.startsWith(".trash/") && !k.startsWith(".links/");
 
 async function remove(c, key) {
   const res = await r2(c, "DELETE", key);
@@ -65,7 +65,7 @@ async function moveOne(c, key, destFolder, mode) {
 export async function moveBatch(c, b) {
   const keys = items(b.keys, 8);
   const dest = typeof b.dest === "string" ? b.dest : "";
-  if (!validPrefix(dest) || dest.startsWith(".trash/")) throw new HttpError(400, "Invalid destination folder.");
+  if (!validPrefix(dest) || dest.startsWith(".trash/") || dest.startsWith(".links/")) throw new HttpError(400, "Invalid destination folder.");
   const mode = b.mode === "copy" ? "copy" : "move";
   const out = { done: [], errors: [] };
   for (const key of keys) {

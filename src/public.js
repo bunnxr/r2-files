@@ -1,10 +1,12 @@
-// Public files and expiring share links, served on PUBLIC_HOST (for example r2.bunnxr.com).
-//   https://HOST/<folder>/<file>                 works for files inside a PUBLIC_FOLDERS folder
-//   https://HOST/<folder>/<file>?e=<unix>&s=<sig>  works for ANY file until it expires
+// Everything served on PUBLIC_HOST (for example r2.bunnxr.com):
+//   https://HOST/<name>                          short link (see links.js), optionally expiring
+//   https://HOST/<folder>/<file>                 files inside a PUBLIC_FOLDERS folder
+//   https://HOST/<folder>/<file>?e=<unix>&s=<sig>  older signed links (still honoured)
 // The Worker checks the rules, then streams the file from R2 (range requests work, so video seeks).
 import { validKey } from "./util.js";
 import { presign, encPath } from "./sigv4.js";
 import { contentDisposition } from "./uploads.js";
+import { lookupLink } from "./links.js";
 
 const enc = new TextEncoder();
 const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -38,41 +40,52 @@ export async function shareUrl(c, key, seconds) {
 
 const plain = (text, status) => new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 
-export async function servePublic(request, c, url) {
-  // Handle CORS preflight (zip reader does cross-origin range requests)
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, HEAD, OPTIONS", "access-control-allow-headers": "*", "access-control-max-age": "86400" } });
-  }
-  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD, OPTIONS" } });
-  let key;
-  try { key = decodeURIComponent(url.pathname.slice(1)); } catch (e) { return plain("Not found", 404); }
-  if (!validKey(key, "file") || key.startsWith(".trash/")) return plain("Not found", 404);
+// Streams one object from R2 to the client. Used for public files and for the same-origin /api/read.
+async function streamObject(c, request, key, { dl, cache, cors }) {
+  const query = {};
+  if (dl) query["response-content-disposition"] = contentDisposition("attachment", key);
+  const upstream = await presign(c, request.method === "HEAD" ? "HEAD" : "GET", key, { query, expires: 300 });
+  const h = {};
+  for (const n of ["range", "if-none-match", "if-modified-since", "if-match", "if-range"]) { const v = request.headers.get(n); if (v) h[n] = v; }
+  let res;
+  try { res = await fetch(upstream, { method: request.method === "HEAD" ? "HEAD" : "GET", headers: h }); } catch (err) { return plain("Storage is unavailable.", 502); }
+  if (res.status === 404) return plain("Not found", 404);
+  if (res.status >= 400 && res.status !== 412 && res.status !== 416) return plain("Storage error.", 502);
+  const out = new Headers();
+  for (const n of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified", "content-disposition"]) { const v = res.headers.get(n); if (v) out.set(n, v); }
+  out.set("cache-control", cache);
+  out.set("x-content-type-options", "nosniff");
+  out.set("referrer-policy", "no-referrer");
+  if (cors) out.set("access-control-allow-origin", "*");
+  // HTML and SVG shown directly from the public host must not be able to run scripts
+  if (cors && /^(text\/html|image\/svg\+xml|application\/xhtml)/i.test(out.get("content-type") || "")) out.set("content-security-policy", "sandbox; default-src 'none'; img-src * data:; style-src 'unsafe-inline'");
+  return new Response(request.method === "HEAD" ? null : res.body, { status: res.status, headers: out });
+}
 
+// Same-origin read for the app itself (zip browsing, text viewer, zipping). No CORS on the bucket is needed for this.
+export const proxyRead = (c, request, key) => streamObject(c, request, key, { dl: false, cache: "no-store", cors: false });
+
+export async function servePublic(request, c, url) {
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
+  let path;
+  try { path = decodeURIComponent(url.pathname.slice(1)); } catch (e) { return plain("Not found", 404); }
+  if (!path) return plain("Not found", 404);
+  const dl = url.searchParams.get("dl") === "1";
+
+  if (path.indexOf("/") < 0) { // short link: https://HOST/charlie.zip
+    const rec = await lookupLink(c, path);
+    if (!rec) return plain("Not found", 404);
+    if (rec.exp && rec.exp * 1000 < Date.now()) return plain("This link has expired.", 410);
+    return streamObject(c, request, rec.key, { dl, cors: true, cache: rec.exp ? "private, max-age=0, must-revalidate" : "public, max-age=300" });
+  }
+
+  const key = path;
+  if (!validKey(key, "file") || key.startsWith(".trash/") || key.startsWith(".links/")) return plain("Not found", 404);
   const e = url.searchParams.get("e"), s = url.searchParams.get("s");
   const signed = !!(e && s);
   if (signed) {
     const v = await verifyShare(c, key, e, s);
     if (v !== "ok") return plain(v === "expired" ? "This link has expired." : "This link is not valid.", 403);
-  }
-  // No signature: allow — every file on the public host is accessible by its path as a permanent direct link
-
-  const query = {};
-  if (url.searchParams.get("dl") === "1") query["response-content-disposition"] = contentDisposition("attachment", key);
-  const upstream = await presign(c, request.method, key, { query, expires: 300 });
-  const h = {};
-  for (const n of ["range", "if-none-match", "if-modified-since", "if-match", "if-range"]) { const v = request.headers.get(n); if (v) h[n] = v; }
-  let res;
-  try { res = await fetch(upstream, { method: request.method, headers: h }); } catch (err) { return plain("Storage is unavailable.", 502); }
-  if (res.status === 404) return plain("Not found", 404);
-  if (res.status >= 400 && res.status !== 412 && res.status !== 416) return plain("Storage error.", 502);
-
-  const out = new Headers();
-  for (const n of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified", "content-disposition"]) { const v = res.headers.get(n); if (v) out.set(n, v); }
-  out.set("cache-control", signed ? "private, max-age=0, must-revalidate" : "public, max-age=300");
-  out.set("x-content-type-options", "nosniff");
-  out.set("referrer-policy", "no-referrer");
-  out.set("access-control-allow-origin", "*");
-  // HTML and SVG shown directly from this host must not be able to run scripts
-  if (/^(text\/html|image\/svg\+xml|application\/xhtml)/i.test(out.get("content-type") || "")) out.set("content-security-policy", "sandbox; default-src 'none'; img-src * data:; style-src 'unsafe-inline'");
-  return new Response(request.method === "HEAD" ? null : res.body, { status: res.status, headers: out });
+  } else if (!isPublicKey(c, key)) return plain("Not found", 404);
+  return streamObject(c, request, key, { dl, cors: true, cache: signed ? "private, max-age=0, must-revalidate" : "public, max-age=300" });
 }

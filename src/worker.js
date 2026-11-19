@@ -6,7 +6,8 @@ import { r2, listAll, bucketUsage, r2Error } from "./r2.js";
 import { verifyAccess } from "./access.js";
 import { uploadInit, uploadComplete, deleteFolderBatch, contentDisposition } from "./uploads.js";
 import { securityPolicy, notConfiguredPage } from "./pages.js";
-import { servePublic, shareUrl } from "./public.js";
+import { servePublic, shareUrl, proxyRead } from "./public.js";
+import { createLink, linkInfo, removeLink } from "./links.js";
 import * as ops from "./fileops.js";
 import { fetchToR2 } from "./urlfetch.js";
 
@@ -57,7 +58,7 @@ async function handle(request, env, ctx) {
       const prefix = url.searchParams.get("prefix") ?? "";
       if (!validPrefix(prefix)) throw new HttpError(400, "Invalid folder path.");
       const r = await listAll(c, { prefix, delimiter: "/", maxPages: 20 });
-      return json({ prefix, folders: r.folders.filter((f) => f !== ".trash/"), files: r.files.filter((f) => f.key !== prefix), truncated: r.truncated });
+      return json({ prefix, folders: r.folders.filter((f) => f !== ".trash/" && f !== ".links/"), files: r.files.filter((f) => f.key !== prefix), truncated: r.truncated });
     }
     case "GET /api/config":
       return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0d6efd"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW, publicHost: c.PUBLIC_HOST, publicFolders: c.PUBLIC_FOLDER_LIST, trashDays: c.TRASH_DAYS });
@@ -69,7 +70,7 @@ async function handle(request, env, ctx) {
       const type = url.searchParams.get("type") || "recent";
       if (type !== "recent" && !TYPES.includes(type)) throw new HttpError(400, "Unknown file type.");
       const u = await bucketUsage(c);
-      const all = u.files.filter((f) => !f.key.endsWith("/") && (type === "recent" ? typeOf(f.key) !== "trash" : typeOf(f.key) === type));
+      const all = u.files.filter((f) => !f.key.endsWith("/") && (type === "recent" ? typeOf(f.key) !== "trash" : typeOf(f.key) === type) && !f.key.startsWith(".links/"));
       all.sort((a, z) => (a.modified < z.modified ? 1 : a.modified > z.modified ? -1 : 0));
       const limit = type === "recent" ? 100 : 500;
       return json({ type, total: all.length, files: all.slice(0, limit), truncated: all.length > limit || u.partial });
@@ -123,6 +124,28 @@ async function handle(request, env, ctx) {
       if (!validKey(b.key, "file") || b.key.startsWith(".trash/")) throw new HttpError(400, "Invalid file.");
       if (!(seconds >= 60 && seconds <= 604800)) throw new HttpError(400, "Links can last between 1 minute and 7 days.");
       return json(await shareUrl(c, b.key, seconds));
+    }
+    case "GET /api/read": {
+      const key = url.searchParams.get("key");
+      if (!validKey(key, "file") || key.startsWith(".links/")) throw new HttpError(400, "Invalid file.");
+      return proxyRead(c, request, key);
+    }
+    case "POST /api/link": {
+      const b = await readJson(request);
+      const seconds = Math.floor(Number(b.seconds));
+      if (!validKey(b.key, "file") || b.key.startsWith(".trash/") || b.key.startsWith(".links/")) throw new HttpError(400, "Invalid file.");
+      if (!(seconds === 0 || (seconds >= 60 && seconds <= 604800))) throw new HttpError(400, "Choose a link length of up to 7 days, or never.");
+      return json(await createLink(c, b.key, seconds));
+    }
+    case "POST /api/link-info": {
+      const b = await readJson(request);
+      if (!validKey(b.key, "file")) throw new HttpError(400, "Invalid file.");
+      return json(c.PUBLIC_HOST ? await linkInfo(c, b.key) : { exists: false });
+    }
+    case "POST /api/link-remove": {
+      const b = await readJson(request);
+      if (!validKey(b.key, "file")) throw new HttpError(400, "Invalid file.");
+      return json(await removeLink(c, b.key));
     }
     case "POST /api/move":
       return json(await ops.moveBatch(c, await readJson(request)));

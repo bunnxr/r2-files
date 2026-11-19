@@ -32,7 +32,7 @@ const CONFIG = {
   TRASH_DAYS: 30,                   // shown in the UI; use the same number in the R2 lifecycle rule for ".trash/"
 
   // ---- Look and feel
-  SITE_TITLE: "r2 by bunnxr",       // shown in the header and browser tab
+  SITE_TITLE: "r2 by bunnxr",           // shown in the header and browser tab
   ACCENT: "#0d6efd",                // accent colour (hex): buttons, links, highlights
   DEFAULT_VIEW: "list",             // "list" (table) or "grid" (cards); the visitor's choice is remembered
 

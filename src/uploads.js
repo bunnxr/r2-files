@@ -13,6 +13,7 @@ async function uploadInit(c, b) {
 
   // sub-folders from a dropped directory: sanitise every segment
   const rel = typeof b.rel === "string" ? b.rel.split("/").filter(Boolean).slice(0, 20).map(sanitizeName).join("/") : "";
+  if (prefix.startsWith(".trash/") || prefix.startsWith(".links/")) throw new HttpError(400, "That folder is reserved.");
   const dest = prefix + (rel ? rel + "/" : "");
   const name = sanitizeName(b.name);
 
