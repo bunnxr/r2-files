@@ -1,6 +1,6 @@
 import { HAS_STREAMS, isZip, readZip, entryBlob, buildZip, mimeOf } from '/zip.js';
 // Settings (title, colours, upload tuning) come from the Worker's CONFIG via /api/config.
-let BOOT = { title: 'Files', accent: '', parallel: 4, retries: 3, view: 'grid', publicHost: '', publicFolders: [], trashDays: 30 };
+let BOOT = { title: 'r2 by bunnxr', accent: '', parallel: 4, retries: 3, view: 'grid', publicHost: '', publicFolders: [], trashDays: 30 };
 try { const r = await fetch('/api/config'); if (r.ok) BOOT = await r.json(); } catch (e) { /* keep defaults */ }
 document.title = BOOT.title;
 { const h1 = document.querySelector('.brand h1'); if (h1) h1.textContent = BOOT.title; }
@@ -611,7 +611,8 @@ async function zipSelected(toDevice) {
 let arc = null;
 const nameCmp = (a, b) => (a.name || a.base).localeCompare(b.name || b.base, undefined, { numeric: true, sensitivity: 'base' });
 async function arcUrl(A) {
-  if (Date.now() - A.t > 40 * 60000) { A.url = (await api('/api/url', { key: A.it.key, mode: 'download' })).url; A.t = Date.now(); }
+  // Public host URLs never expire; presigned R2 URLs need refreshing after ~40 min
+  if (!BOOT.publicHost && Date.now() - A.t > 40 * 60000) { A.url = (await api('/api/url', { key: A.it.key, mode: 'download' })).url; A.t = Date.now(); }
   return A.url;
 }
 function arcChildren(A, dir) {
@@ -694,9 +695,10 @@ async function openArchive(it) {
   if (!HAS_STREAMS) { toast('Your browser is too old to open archives (needs Chrome 103, Safari 16.4 or Firefox 113 or newer).', 'err'); return; }
   openModal('<div class="pv"><div class="pv-b"><div class="spin"></div></div></div>');
   try {
-    const r = await api('/api/url', { key: it.key, mode: 'download' });
-    const entries = await readZip(r.url, it.size);
-    arc = { it, url: r.url, t: Date.now(), entries, dir: '', sel: new Set(), view: null };
+    // Use the public host URL (Worker-proxied, CORS-safe) when available; fall back to presigned R2 URL.
+    const url = BOOT.publicHost ? publicUrl(it.key) : (await api('/api/url', { key: it.key, mode: 'download' })).url;
+    const entries = await readZip(url, it.size);
+    arc = { it, url, t: Date.now(), entries, dir: '', sel: new Set(), view: null };
     showArc();
   } catch (e) { closeModal(); toast(e.message, 'err'); }
 }
@@ -887,8 +889,10 @@ async function moveFiles(list, mode) {
 /* --- share links --- */
 function openShare(it) {
   const pub = isPublicKey(it.key);
+  const hasPublicHost = !!BOOT.publicHost;
   openModal('<div class="dlg" role="dialog" aria-modal="true"><h2>Share “' + esc(it.name) + '”</h2>' +
     (pub ? '<span class="lbl2">Public link</span><button class="btn primary block" data-s="public">' + ico('globe', 17) + ' Copy public link</button><small class="hint">Anyone with this link can open the file. It never expires.</small>' : '') +
+    (hasPublicHost && !pub ? '<span class="lbl2">Permanent link</span><button class="btn primary block" data-s="permanent">' + ico('link', 17) + ' Copy permanent link</button><small class="hint">Direct short link — works forever.</small>' : '') +
     '<span class="lbl2">Expiring link</span><div class="seg3"><button class="btn" data-s="3600">1 hour</button><button class="btn" data-s="86400">1 day</button><button class="btn" data-s="604800">7 days</button></div>' +
     '<input id="shLink" class="field" readonly hidden><small class="hint" id="shNote">Pick how long the link should work. It is copied for you.</small><div class="dlg-acts"><button class="btn" data-x="no">Close</button></div></div>');
   const show = async (url, note) => { const f = $('#shLink'); f.value = url; f.hidden = false; f.select(); const ok = await copyText(url); const n = $('#shNote'); if (n) n.textContent = (ok ? 'Copied. ' : 'Copy the link above. ') + note; };
@@ -898,6 +902,7 @@ function openShare(it) {
     if (!b) return;
     try {
       if (b.dataset.s === 'public') return show(publicUrl(it.key), 'Anyone can open it.');
+      if (b.dataset.s === 'permanent') return show('https://' + BOOT.publicHost + '/' + it.key.split('/').map(encodeURIComponent).join('/'), 'This link works forever.');
       const r = await api('/api/share', { key: it.key, seconds: +b.dataset.s });
       show(r.url, 'It works until ' + new Date(r.expires * 1000).toLocaleString() + '.');
     } catch (err) { toast(err.message, 'err'); }

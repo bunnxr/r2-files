@@ -39,7 +39,11 @@ export async function shareUrl(c, key, seconds) {
 const plain = (text, status) => new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 
 export async function servePublic(request, c, url) {
-  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
+  // Handle CORS preflight (zip reader does cross-origin range requests)
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, HEAD, OPTIONS", "access-control-allow-headers": "*", "access-control-max-age": "86400" } });
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD, OPTIONS" } });
   let key;
   try { key = decodeURIComponent(url.pathname.slice(1)); } catch (e) { return plain("Not found", 404); }
   if (!validKey(key, "file") || key.startsWith(".trash/")) return plain("Not found", 404);
@@ -49,7 +53,8 @@ export async function servePublic(request, c, url) {
   if (signed) {
     const v = await verifyShare(c, key, e, s);
     if (v !== "ok") return plain(v === "expired" ? "This link has expired." : "This link is not valid.", 403);
-  } else if (!isPublicKey(c, key)) return plain("Not found", 404);
+  }
+  // No signature: allow — every file on the public host is accessible by its path as a permanent direct link
 
   const query = {};
   if (url.searchParams.get("dl") === "1") query["response-content-disposition"] = contentDisposition("attachment", key);
