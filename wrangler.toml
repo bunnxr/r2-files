@@ -2,7 +2,7 @@ name = "r2-files"
 main = "src/worker.js"
 compatibility_date = "2025-06-01"
 
-# Everything must go through upload.bunnxr.com (behind Cloudflare Access)
+# Everything must go through files.bunnxr.com (behind Cloudflare Access)
 workers_dev = false
 preview_urls = false
 
