@@ -1,6 +1,6 @@
 import { HAS_STREAMS, isZip, readZip, entryBlob, buildZip, mimeOf } from '/zip.js';
 // Settings (title, colours, upload tuning) come from the Worker's CONFIG via /api/config.
-let BOOT = { title: 'Files', accent: '', parallel: 4, retries: 3, view: 'grid' };
+let BOOT = { title: 'Files', accent: '', parallel: 4, retries: 3, view: 'grid', publicHost: '', publicFolders: [], trashDays: 30 };
 try { const r = await fetch('/api/config'); if (r.ok) BOOT = await r.json(); } catch (e) { /* keep defaults */ }
 document.title = BOOT.title;
 { const h1 = document.querySelector('.brand h1'); if (h1) h1.textContent = BOOT.title; }
@@ -12,6 +12,7 @@ const ls = { get(k) { try { return localStorage.getItem(k); } catch (e) { return
 const fmt = (n) => { const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (i === 0 ? n : Math.round(n * 10) / 10) + ' ' + u[i]; };
 const fdate = (s) => (s ? new Date(s).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '');
 const CANCEL = new Error('Canceled');
+let V = null; // the open preview / gallery, if any
 
 /* ---------- icons ---------- */
 const P = {
@@ -41,6 +42,14 @@ const P = {
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   sort: '<path d="M12 5v14m0 0 5-5m-5 5-5-5"/>',
   ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  move: '<path d="M4 12h15M13 6l6 6-6 6"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
+  edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/>',
+  save: '<path d="M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+  chevL: '<path d="m15 6-6 6 6 6"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   broom: '<path d="M4 20h16M7 20l1-9h8l1 9M10 11V4h4v7"/>'
 };
@@ -80,8 +89,8 @@ const modalEl = $('#modal');
 let modalDone = null;
 function openModal(html, onClose) { modalEl.innerHTML = html; modalEl.hidden = false; modalDone = onClose || null; document.body.classList.add('lock'); }
 function closeModal() { modalEl.hidden = true; modalEl.innerHTML = ''; modalEl.onclick = null; document.body.classList.remove('lock'); const f = modalDone; modalDone = null; if (f) f(); }
-modalEl.addEventListener('mousedown', (e) => { if (e.target === modalEl) closeModal(); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modalEl.hidden) closeModal(); });
+modalEl.addEventListener('mousedown', (e) => { if (e.target === modalEl && !(V && V.edit)) closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modalEl.hidden && !(V && V.edit)) closeModal(); });
 
 function confirmDlg(title, msg, label) {
   return new Promise((resolve) => {
@@ -113,10 +122,10 @@ $('#upToggle').innerHTML = ico('down', 18);
 $('#upClear').innerHTML = ico('broom', 17);
 
 /* ---------- browsing ---------- */
-const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other'];
-const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files' };
-const CAT = { image: ['Images', '#3b82f6', 'image'], video: ['Videos', '#ef4444', 'video'], audio: ['Audio', '#8b5cf6', 'audio'], doc: ['Documents', '#22a06b', 'doc'], archive: ['Archives', '#f59e0b', 'archive'], other: ['Other', '#64748b', 'file'] };
-const NAV = [['', 'All files', 'folder'], ['recent', 'Recent', 'clock'], ['image', 'Images', 'image'], ['video', 'Videos', 'video'], ['audio', 'Audio', 'audio'], ['doc', 'Documents', 'doc'], ['archive', 'Archives', 'archive'], ['other', 'Other', 'file']];
+const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other', 'trash'];
+const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash' };
+const CAT = { image: ['Images', '#3b82f6', 'image'], video: ['Videos', '#ef4444', 'video'], audio: ['Audio', '#8b5cf6', 'audio'], doc: ['Documents', '#22a06b', 'doc'], archive: ['Archives', '#f59e0b', 'archive'], other: ['Other', '#64748b', 'file'], trash: ['Trash', '#94a3b8', 'trash'] };
+const NAV = [['', 'All files', 'folder'], ['recent', 'Recent', 'clock'], ['image', 'Images', 'image'], ['video', 'Videos', 'video'], ['audio', 'Audio', 'audio'], ['doc', 'Documents', 'doc'], ['archive', 'Archives', 'archive'], ['other', 'Other', 'file'], ['trash', 'Trash', 'trash']];
 S.kind = ''; S.usage = null; S.total = 0; S.shownFolders = [];
 $('#sortDir').innerHTML = ico('sort', 17);
 
@@ -149,7 +158,11 @@ async function load(silent) {
       const d = await api('/api/browse?type=' + encodeURIComponent(S.kind));
       if (seq !== S.seq) return;
       S.folders = [];
-      S.files = d.files.map((f) => { const i = f.key.lastIndexOf('/'); return { type: 'file', key: f.key, name: f.key.slice(i + 1), dir: i > 0 ? f.key.slice(0, i) : '', size: f.size, modified: f.modified }; });
+      S.files = d.files.map((f) => {
+        if (S.kind === 'trash') { const orig = f.key.replace(/^\.trash\/[^/]+\//, ''), t = orig.lastIndexOf('/'); return { type: 'file', key: f.key, trash: true, orig: orig, name: orig.slice(t + 1), dir: t > 0 ? orig.slice(0, t) : '', size: f.size, modified: f.modified }; }
+        const i = f.key.lastIndexOf('/');
+        return { type: 'file', key: f.key, name: f.key.slice(i + 1), dir: i > 0 ? f.key.slice(0, i) : '', size: f.size, modified: f.modified };
+      });
       S.total = d.total;
       if (d.truncated) toast('Showing the newest ' + d.files.length + ' files only. Use the search box or folders to find older ones.', 'info', 6000);
     } else {
@@ -193,16 +206,22 @@ function filtered() {
 }
 
 function itemHtml(it, i) {
-  const k = kindOf(it.name), pv = PREV[k];
+  const k = kindOf(it.name), pub = !it.trash && isPublicKey(it.key);
   let acts = '';
-  if (pv) acts += '<button class="ib" data-act="preview" title="Preview" aria-label="Preview ' + esc(it.name) + '">' + ico('eye', 17) + '</button>';
-  acts += '<button class="ib" data-act="download" title="Download" aria-label="Download ' + esc(it.name) + '">' + ico('download', 17) + '</button>';
-  acts += '<button class="ib danger" data-act="delete" title="Delete" aria-label="Delete ' + esc(it.name) + '">' + ico('trash', 17) + '</button>';
+  if (it.trash) {
+    acts += '<button class="ib" data-act="restore" title="Restore" aria-label="Restore ' + esc(it.name) + '">' + ico('retry', 17) + '</button>';
+    acts += '<button class="ib danger" data-act="purge" title="Delete forever" aria-label="Delete ' + esc(it.name) + ' forever">' + ico('trash', 17) + '</button>';
+  } else {
+    if (isViewable(it.name)) acts += '<button class="ib" data-act="preview" title="Preview" aria-label="Preview ' + esc(it.name) + '">' + ico('eye', 17) + '</button>';
+    acts += '<button class="ib" data-act="download" title="Download" aria-label="Download ' + esc(it.name) + '">' + ico('download', 17) + '</button>';
+    acts += '<button class="ib" data-act="share" title="' + (pub ? 'Copy public link' : 'Share link') + '" aria-label="' + (pub ? 'Copy public link for ' : 'Share ') + esc(it.name) + '">' + ico(pub ? 'globe' : 'link', 17) + '</button>';
+    acts += '<button class="ib" data-act="more" title="More" aria-label="More actions for ' + esc(it.name) + '">' + ico('more', 17) + '</button>';
+  }
   const date = esc(fdate(it.modified));
-  return '<div class="item' + (pv || isZip(it.name) ? ' go' : '') + '" data-i="' + i + '"><div class="main"><input type="checkbox" class="sel" data-sel aria-label="Select ' + esc(it.name) + '"' + (S.sel.has(it.key) ? ' checked' : '') + '>' + tile(k, 20) + '<div class="nm"><b title="' + esc(it.key) + '">' + esc(it.name) + '</b>' + (it.dir ? '<small class="path">' + esc(it.dir) + '</small>' : '') + '<small class="sub"><span>' + fmt(it.size) + '</span><span>' + date + '</span></small></div></div><span class="sz">' + fmt(it.size) + '</span><span class="dt">' + date + '</span><div class="acts">' + acts + '</div></div>';
+  return '<div class="item' + (!it.trash && (isViewable(it.name) || isZip(it.name)) ? ' go' : '') + '" data-i="' + i + '"><div class="main"><input type="checkbox" class="sel" data-sel aria-label="Select ' + esc(it.name) + '"' + (S.sel.has(it.key) ? ' checked' : '') + '>' + tile(k, 20) + '<div class="nm"><b title="' + esc(it.trash ? it.orig : it.key) + '">' + esc(it.name) + '</b>' + (it.dir ? '<small class="path">' + esc(it.dir) + '</small>' : '') + '<small class="sub"><span>' + fmt(it.size) + '</span><span>' + date + '</span></small></div></div><span class="sz">' + fmt(it.size) + '</span><span class="dt">' + date + '</span><div class="acts">' + acts + '</div></div>';
 }
 function folderHtml(f, i) {
-  return '<div class="fcard" data-f="' + i + '"><div class="f-top">' + tile('folder', 22) + '<button class="ib danger" data-act="delete" title="Delete folder" aria-label="Delete folder ' + esc(f.name) + '">' + ico('trash', 17) + '</button></div><b title="' + esc(f.name) + '">' + esc(f.name) + '</b><small>Folder</small></div>';
+  return '<div class="fcard" data-f="' + i + '"><div class="f-top">' + tile('folder', 22) + '<button class="ib danger" data-act="delete" title="Move folder to trash" aria-label="Move folder ' + esc(f.name) + ' to trash">' + ico('trash', 17) + '</button></div><b title="' + esc(f.name) + '">' + esc(f.name) + '</b><small>Folder' + (isPublicKey(f.key) ? '<span class="badge">Public</span>' : '') + '</small></div>';
 }
 function theadHtml() {
   const a = (k) => (S.by === k ? (S.dir > 0 ? ' ↑' : ' ↓') : '');
@@ -233,6 +252,8 @@ function renderNav() {
 
 function render() {
   renderCrumbs(); renderNav(); applyView();
+  $('#trashbar').hidden = S.kind !== 'trash';
+  $('#trashText').textContent = 'Deleted files stay here for ' + BOOT.trashDays + ' days, then they are removed automatically.';
   const list = $('#list'), typeMode = !!S.kind;
   $('#filesTitle').textContent = typeMode ? KIND_TITLE[S.kind] : 'Files';
   if (S.loading) {
@@ -280,8 +301,9 @@ $('#list').addEventListener('click', (e) => {
   const row = e.target.closest('[data-i]'); if (!row) return;
   const it = S.shown[+row.dataset.i]; if (!it) return;
   if (e.target.closest('[data-sel]')) { toggleSel(it.key, e.target.checked); return; }
-  if (act) { const a = act.dataset.act; if (a === 'download') download(it); else if (a === 'delete') del(it); else if (a === 'preview') preview(it); return; }
-  if (PREV[kindOf(it.name)]) preview(it); else if (isZip(it.name)) openArchive(it);
+  if (act) { const a = act.dataset.act; if (a === 'download') download(it); else if (a === 'preview') preview(it); else if (a === 'share') { if (isPublicKey(it.key)) copyPublic(it); else openShare(it); } else if (a === 'more') openMore(it); else if (a === 'restore') restoreItems([it]); else if (a === 'purge') purgeItems([it]); return; }
+  if (it.trash) return;
+  if (isViewable(it.name)) preview(it); else if (isZip(it.name)) openArchive(it);
 });
 
 /* ---------- download / preview / delete / new folder ---------- */
@@ -292,36 +314,6 @@ async function download(it) {
     a.href = r.url; a.rel = 'noopener'; a.style.display = 'none';
     document.body.appendChild(a); a.click(); a.remove();
   } catch (e) { toast(e.message, 'err'); }
-}
-async function preview(it) {
-  const k = kindOf(it.name);
-  openModal('<div class="pv" role="dialog" aria-modal="true"><div class="pv-h"><b>' + esc(it.name) + '</b><button class="btn" data-x="dl">' + ico('download', 16) + ' Download</button><button class="ib" data-x="close" aria-label="Close">' + ico('x', 18) + '</button></div><div class="pv-b" id="pvb"><div class="spin"></div></div></div>');
-  modalEl.onclick = (e) => { const b = e.target.closest('[data-x]'); if (!b) return; if (b.dataset.x === 'close') closeModal(); else if (b.dataset.x === 'dl') download(it); };
-  try {
-    const r = await api('/api/url', { key: it.key, mode: 'inline' });
-    const box = $('#pvb');
-    if (!box) return;
-    const u = esc(r.url);
-    box.innerHTML = k === 'image' ? '<img src="' + u + '" alt="' + esc(it.name) + '">'
-      : k === 'video' ? '<video src="' + u + '" controls playsinline autoplay></video>'
-      : k === 'audio' ? '<audio src="' + u + '" controls autoplay></audio>'
-      : '<iframe src="' + u + '" title="' + esc(it.name) + '"></iframe>';
-    if (k === 'pdf') { const dl = $('[data-x=dl]', modalEl); if (dl) dl.insertAdjacentHTML('beforebegin', '<a class="btn" href="' + u + '" target="_blank" rel="noopener">Open</a>'); }
-  } catch (e) { closeModal(); toast(e.message, 'err'); }
-}
-async function del(it) {
-  const isF = it.type === 'folder';
-  const ok = await confirmDlg(isF ? 'Delete this folder?' : 'Delete this file?', isF ? 'The folder “' + it.name + '” and everything inside it will be permanently deleted.' : '“' + it.name + '” will be permanently deleted.', 'Delete');
-  if (!ok) return;
-  const t = toast('Deleting…', 'info', 0);
-  try {
-    if (isF) {
-      let n = 0;
-      for (;;) { const r = await api('/api/delete-folder', { prefix: it.key }); if (!r.deleted) break; n += r.deleted; t.set('Deleting… ' + n + ' items removed'); }
-    } else await api('/api/delete', { key: it.key });
-    t.close(); toast('Deleted “' + it.name + '”', 'ok');
-  } catch (e) { t.close(); toast(e.message, 'err'); }
-  load(true); loadUsage();
 }
 $('#btnFolder').onclick = async () => {
   const name = await askFolder();
@@ -388,12 +380,31 @@ async function uploadPart(it, num, blob, onProg) {
   }
   throw last;
 }
+const RESUME_KEY = 'fm-resume-v1';
+const resumeLoad = () => { try { return JSON.parse(ls.get(RESUME_KEY) || '{}'); } catch (e) { return {}; } };
+const resumeSave = (m) => ls.set(RESUME_KEY, JSON.stringify(m));
+const fpOf = (it) => [it.file.name, it.file.size, it.file.lastModified].join('|');
+function resumeSet(it, rec) { const m = resumeLoad(); m[fpOf(it)] = Object.assign({ t: Date.now(), name: it.file.name, size: it.file.size }, rec); resumeSave(m); }
+function resumeDrop(it) { const m = resumeLoad(); delete m[fpOf(it)]; resumeSave(m); renderResumeNote(); }
 async function uploadFile(it) {
-  it.state = 'uploading'; it.canceled = false; it.fail = null; it.samples = []; it.got = [];
+  it.state = 'uploading'; it.canceled = false; it.fail = null; it.samples = []; it.got = []; it.resumed = 0;
   renderUploads();
   let init = null;
   try {
-    init = await api('/api/upload/init', { prefix: it.prefix, rel: it.rel, name: it.file.name, size: it.file.size, type: it.file.type || '' });
+    // Unfinished upload of this exact file (same name, size and date)? Ask R2 which chunks it already has.
+    let have = new Map();
+    const rec = resumeLoad()[fpOf(it)];
+    if (rec && rec.uploadId) {
+      try {
+        const r = await api('/api/upload/parts', { key: rec.key, uploadId: rec.uploadId });
+        r.parts.forEach((p) => have.set(p.n, p));
+        init = { mode: 'multipart', key: rec.key, uploadId: rec.uploadId, partSize: rec.partSize, parts: rec.parts };
+      } catch (e) { resumeDrop(it); init = null; have = new Map(); }
+    }
+    if (!init) {
+      init = await api('/api/upload/init', { prefix: it.prefix, rel: it.rel, name: it.file.name, size: it.file.size, type: it.file.type || '' });
+      if (init.mode === 'multipart') resumeSet(it, { key: init.key, uploadId: init.uploadId, partSize: init.partSize, parts: init.parts });
+    }
     it.name = init.key.split('/').pop();
     it.key = init.key;
     if (init.mode === 'multipart') {
@@ -401,12 +412,18 @@ async function uploadFile(it) {
       const n = init.parts, ps = init.partSize;
       const etags = new Array(n);
       it.got = new Array(n).fill(0);
+      const finished = new Array(n).fill(false);
+      have.forEach((p, num) => {
+        const want = num < n ? ps : it.size - ps * (n - 1);
+        if (num >= 1 && num <= n && p.size === want && p.etag) { etags[num - 1] = p.etag; it.got[num - 1] = want; finished[num - 1] = true; it.resumed++; }
+      });
       let next = 0;
       const run = async () => {
         try {
           while (!it.canceled && !it.fail) {
             const i = next++;
             if (i >= n) return;
+            if (finished[i]) continue;
             const blob = it.file.slice(i * ps, Math.min((i + 1) * ps, it.size));
             etags[i] = await uploadPart(it, i + 1, blob, (b) => { it.got[i] = b; });
             it.got[i] = blob.size;
@@ -421,13 +438,20 @@ async function uploadFile(it) {
       if (it.fail) throw it.fail;
       await api('/api/upload/complete', { key: init.key, uploadId: init.uploadId, parts: etags.map((e, i) => ({ PartNumber: i + 1, ETag: e })) });
     } else if (it.canceled) throw CANCEL;
+    resumeDrop(it);
     it.state = 'done';
   } catch (e) {
-    if (init && init.uploadId) api('/api/upload/abort', { key: init.key, uploadId: init.uploadId }).catch(() => {});
-    if (it.canceled || e === CANCEL) it.state = 'canceled';
-    else { it.state = 'error'; it.error = e.message || 'Upload failed'; }
+    if (it.canceled || e === CANCEL) {
+      if (init && init.uploadId) api('/api/upload/abort', { key: init.key, uploadId: init.uploadId }).catch(() => {});
+      resumeDrop(it);
+      it.state = 'canceled';
+    } else {
+      // keep the multipart upload: "try again" (or choosing the file later) continues where it stopped
+      it.state = 'error'; it.error = (e.message || 'Upload failed') + ' Try again to continue.';
+    }
   }
   renderUploads();
+  renderResumeNote();
   load(true); loadUsage();
 }
 function cancelItem(it) {
@@ -518,8 +542,10 @@ window.addEventListener('drop', async (e) => {
 
 /* ---------- selection, archives (browse / extract) and "zip selected" ---------- */
 function renderSel() {
-  const n = S.sel.size;
+  const n = S.sel.size, tr = S.kind === 'trash';
   $('#selbar').hidden = !n;
+  ['selDl', 'selZip', 'selMove', 'selCopy', 'selDel'].forEach((id) => { $('#' + id).hidden = tr; });
+  ['selRestore', 'selPurge'].forEach((id) => { $('#' + id).hidden = !tr; });
   if (n) { let sz = 0; S.files.forEach((f) => { if (S.sel.has(f.key)) sz += f.size; }); $('#selCount').textContent = n + (n === 1 ? ' file selected' : ' files selected') + ' (' + fmt(sz) + ')'; }
   const all = $('[data-selall]');
   if (all) { const c = S.shown.filter((f) => S.sel.has(f.key)).length; all.checked = c > 0 && c === S.shown.length; all.indeterminate = c > 0 && c < S.shown.length; }
@@ -531,7 +557,6 @@ function selectAll(on) {
   renderSel();
 }
 $('#selClear').onclick = () => { S.sel.clear(); document.querySelectorAll('#list [data-sel]').forEach((cb) => { cb.checked = false; }); renderSel(); };
-$('#selZip').onclick = () => zipSelected();
 
 let job = null;
 function startJob(title) {
@@ -542,7 +567,7 @@ function startJob(title) {
 }
 function updateJob(sub, pct) { $('#jobSub').textContent = sub; if (pct != null) $('#jobBar').style.width = pct + '%'; }
 function endJob() { job = null; $('#job').hidden = true; }
-$('#jobCancel').onclick = () => { if (job) { job.canceled = true; $('#jobSub').textContent = 'Canceling…'; } };
+$('#jobCancel').onclick = () => { if (job) { job.canceled = true; if (job.onCancel) job.onCancel(); $('#jobSub').textContent = 'Canceling…'; } };
 
 function askName(title, desc, def, label) {
   return new Promise((resolve) => {
@@ -561,12 +586,13 @@ function saveBlob(blob, name) {
 }
 
 /* --- zip selected --- */
-async function zipSelected() {
+async function zipSelected(toDevice) {
   const chosen = S.files.filter((f) => S.sel.has(f.key));
   if (!chosen.length) return;
   if (!HAS_STREAMS) { toast('Your browser is too old for zipping (needs Chrome 103, Safari 16.4 or Firefox 113 or newer).', 'err'); return; }
   const prefix = S.prefix;
-  const name = await askName('Zip selected files', 'The zip will be saved in ' + (prefix ? '/' + prefix : 'the top level') + '.', 'archive.zip', 'Create zip');
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+  const name = toDevice ? 'files-' + stamp : await askName('Save a zip in R2', 'The zip will be saved in ' + (prefix ? '/' + prefix : 'the top level') + '.', 'archive.zip', 'Create zip');
   if (!name) return;
   const zname = /\.zip$/i.test(name) ? name : name + '.zip';
   const j = startJob('Creating ' + zname);
@@ -574,9 +600,9 @@ async function zipSelected() {
   try {
     const items = chosen.map((f) => ({ zipName: S.kind ? f.key : f.name, size: f.size, modified: f.modified, getUrl: async () => (await api('/api/url', { key: f.key, mode: 'download' })).url }));
     const blob = await buildZip(items, { canceled: () => j.canceled, onProgress: (read, total, i, nm) => updateJob((i + 1) + ' of ' + items.length + ': ' + nm, Math.min(99, total ? (read / total) * 100 : 0)) });
-    enqueue([{ file: new File([blob], zname, { type: 'application/zip' }), rel: '' }], prefix);
-    S.sel.clear(); document.querySelectorAll('#list [data-sel]').forEach((cb) => { cb.checked = false; }); renderSel();
-    toast('Zip ready. Uploading ' + zname + '…', 'ok');
+    if (toDevice) saveBlob(blob, zname); else enqueue([{ file: new File([blob], zname, { type: 'application/zip' }), rel: '' }], prefix);
+    if (!toDevice) { S.sel.clear(); document.querySelectorAll('#list [data-sel]').forEach((cb) => { cb.checked = false; }); renderSel(); }
+    toast(toDevice ? 'Your zip is downloading.' : 'Zip ready. Uploading ' + zname + '…', 'ok');
   } catch (e) { if (!j.canceled) toast(e.message, 'err'); }
   endJob();
 }
@@ -715,6 +741,413 @@ async function arcExtract() {
   } catch (err) { toast('Extraction stopped: ' + err.message, 'err'); }
   endJob();
 }
+
+/* ---------- links, trash, move/copy, viewer + editor, URL upload, paste, resume, PWA ---------- */
+const TEXT_EXT = ' txt md markdown json csv tsv log js mjs ts jsx tsx css html htm xml yml yaml toml ini conf cfg env sh bash py rb go rs java c cpp h hpp cs php sql srt vtt ';
+const isText = (n) => { const e = n.indexOf('.') < 0 ? '' : n.split('.').pop().toLowerCase(); return (!!e && TEXT_EXT.indexOf(' ' + e + ' ') >= 0) || /^(readme|license|dockerfile|makefile)$/i.test(n); };
+const isViewable = (n) => !!PREV[kindOf(n)] || isText(n);
+const isEditable = (n, size) => isText(n) && size <= 1048576;
+const isPublicKey = (key) => !!BOOT.publicHost && (BOOT.publicFolders || []).some((p) => key.indexOf(p) === 0);
+const publicUrl = (key) => 'https://' + BOOT.publicHost + '/' + key.split('/').map(encodeURIComponent).join('/');
+const tid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+$('#folderUpIco').innerHTML = ico('folder', 18);
+$('#urlIco').innerHTML = ico('globe', 18);
+
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch (e) { /* try the old way */ }
+  try { const ta = document.createElement('textarea'); ta.value = t; ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; } catch (e) { return false; }
+}
+function copyPublic(it) { const u = publicUrl(it.key); copyText(u).then((ok) => toast(ok ? 'Public link copied' : u, ok ? 'ok' : 'info', ok ? 3000 : 9000)); }
+
+/* --- generic helpers: action sheet, batches --- */
+function sheet(title, rows) {
+  return new Promise((resolve) => {
+    let val = null;
+    openModal('<div class="dlg" role="dialog" aria-modal="true"><h2>' + esc(title) + '</h2><div class="sheet">' + rows.map((r) => '<button data-pick="' + r[0] + '"' + (r[3] ? ' class="danger"' : '') + '>' + ico(r[1], 19) + '<span>' + esc(r[2]) + '</span></button>').join('') + '</div></div>', () => resolve(val));
+    modalEl.onclick = (e) => { const b = e.target.closest('[data-pick]'); if (b) { val = b.dataset.pick; closeModal(); } };
+  });
+}
+async function runBatches(title, list, size, call) {
+  const j = startJob(title);
+  if (!j) return null;
+  let done = 0;
+  const errors = [];
+  try {
+    for (let i = 0; i < list.length && !j.canceled; i += size) {
+      updateJob(done + ' of ' + list.length, (done / list.length) * 100);
+      const chunk = list.slice(i, i + size);
+      const r = await call(chunk);
+      const bad = r && r.errors ? r.errors : [];
+      done += chunk.length - bad.length;
+      bad.forEach((x) => errors.push(x.error || String(x)));
+    }
+  } catch (e) { errors.push(e.message); }
+  const canceled = j.canceled;
+  endJob();
+  return { done, errors, canceled };
+}
+function report(verb, r) {
+  if (!r) return;
+  const n = r.done + (r.done === 1 ? ' file' : ' files');
+  if (r.errors.length) toast(verb + ' ' + n + '. ' + r.errors.length + ' failed: ' + r.errors[0], 'err', 9000);
+  else toast(r.canceled ? 'Stopped after ' + n + '.' : verb + ' ' + n + '.', r.canceled ? 'info' : 'ok');
+  S.sel.clear(); load(true); loadUsage();
+}
+
+/* --- trash --- */
+async function del(it) {
+  if (S.kind === 'trash') return purgeItems([it]);
+  const isF = it.type === 'folder';
+  const ok = await confirmDlg(isF ? 'Move folder to trash?' : 'Move to trash?', (isF ? '“' + it.name + '” and everything inside it' : '“' + it.name + '”') + ' will be moved to the trash. You can restore it for ' + BOOT.trashDays + ' days.', 'Move to trash');
+  if (!ok) return;
+  if (isF) await trashFolder(it); else await trashFiles([it]);
+}
+async function trashFiles(list) {
+  const id = tid();
+  report('Moved to trash:', await runBatches('Moving to trash', list, 12, (ch) => api('/api/trash', { keys: ch.map((f) => f.key), id })));
+}
+async function trashFolder(f) {
+  const id = tid(), j = startJob('Moving “' + f.name + '” to trash');
+  if (!j) return;
+  let n = 0;
+  const errs = [];
+  try {
+    for (;;) {
+      if (j.canceled) break;
+      const r = await api('/api/trash-folder', { prefix: f.key, id });
+      if (!r.listed) break;
+      n += r.moved; r.errors.forEach((x) => errs.push(x.error));
+      updateJob(n + ' files moved', null);
+      if (!r.moved) break;
+    }
+  } catch (e) { errs.push(e.message); }
+  endJob();
+  if (errs.length) toast('Some files could not be moved: ' + errs[0], 'err', 9000); else toast(j.canceled ? 'Stopped after ' + n + ' files.' : 'Folder moved to trash.', j.canceled ? 'info' : 'ok');
+  load(true); loadUsage();
+}
+async function restoreItems(list) {
+  if (!list.length) return;
+  report('Restored', await runBatches('Restoring', list, 8, (ch) => api('/api/restore', { keys: ch.map((f) => f.key) })));
+}
+async function purgeItems(list) {
+  if (!list.length) return;
+  const ok = await confirmDlg('Delete forever?', (list.length === 1 ? '“' + list[0].name + '” will' : list.length + ' files will') + ' be permanently deleted. This cannot be undone.', 'Delete forever');
+  if (!ok) return;
+  report('Deleted', await runBatches('Deleting forever', list, 1, async (ch) => { await api('/api/delete', { key: ch[0].key }); return {}; }));
+}
+async function emptyTrash() {
+  const ok = await confirmDlg('Empty the trash?', 'Everything in the trash will be permanently deleted.', 'Empty trash');
+  if (!ok) return;
+  const j = startJob('Emptying the trash');
+  if (!j) return;
+  let n = 0;
+  try {
+    for (;;) { if (j.canceled) break; const r = await api('/api/empty-trash', {}); if (!r.deleted) break; n += r.deleted; updateJob(n + ' files deleted', null); }
+    toast('Trash emptied.', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+  endJob(); load(true); loadUsage();
+}
+$('#emptyTrash').onclick = emptyTrash;
+
+/* --- move / copy --- */
+function pickFolder(title, label, start) {
+  return new Promise((resolve) => {
+    let dir = start || '', val = null;
+    const draw = async () => {
+      let cr = '<a data-d="">' + esc(BOOT.title) + '</a>', acc = '';
+      dir.split('/').filter(Boolean).forEach((p) => { acc += p + '/'; cr += '<span class="sep">' + ico('chev', 14) + '</span><a data-d="' + esc(acc) + '">' + esc(p) + '</a>'; });
+      modalEl.innerHTML = '<div class="dlg pick" role="dialog" aria-modal="true"><h2>' + esc(title) + '</h2><div class="arc-crumbs">' + cr + '</div><div class="pk-list" id="pkList"><div class="spin" style="margin:28px auto"></div></div><div class="dlg-acts"><button class="btn" data-x="no">Cancel</button><button class="btn primary" data-x="ok">' + esc(label) + '</button></div></div>';
+      const mine = dir;
+      try {
+        const d = await api('/api/list?prefix=' + encodeURIComponent(dir));
+        if (mine !== dir || !$('#pkList')) return;
+        $('#pkList').innerHTML = d.folders.length ? d.folders.map((f) => '<div class="pk-row" data-d="' + esc(f) + '">' + ico('folder', 18) + '<span>' + esc(f.slice(dir.length).replace(/\/$/, '')) + '</span></div>').join('') : '<div class="empty" style="padding:28px 12px"><p>No folders in here. You can choose this one.</p></div>';
+      } catch (e) { if ($('#pkList')) $('#pkList').innerHTML = '<div class="empty"><p>' + esc(e.message) + '</p></div>'; }
+    };
+    openModal('', () => resolve(val));
+    modalEl.onclick = (e) => {
+      const d = e.target.closest('[data-d]');
+      if (d) { dir = d.dataset.d; draw(); return; }
+      const x = e.target.closest('[data-x]');
+      if (!x) return;
+      if (x.dataset.x === 'ok') val = dir;
+      closeModal();
+    };
+    draw();
+  });
+}
+async function moveFiles(list, mode) {
+  if (!list.length) return;
+  const copy = mode === 'copy';
+  const dest = await pickFolder(copy ? 'Copy to…' : 'Move to…', copy ? 'Copy here' : 'Move here', S.kind ? '' : S.prefix);
+  if (dest === null) return;
+  report(copy ? 'Copied' : 'Moved', await runBatches((copy ? 'Copying ' : 'Moving ') + list.length + (list.length === 1 ? ' file' : ' files'), list, 8, (ch) => api('/api/move', { keys: ch.map((f) => f.key), dest, mode })));
+}
+
+/* --- share links --- */
+function openShare(it) {
+  const pub = isPublicKey(it.key);
+  openModal('<div class="dlg" role="dialog" aria-modal="true"><h2>Share “' + esc(it.name) + '”</h2>' +
+    (pub ? '<span class="lbl2">Public link</span><button class="btn primary block" data-s="public">' + ico('globe', 17) + ' Copy public link</button><small class="hint">Anyone with this link can open the file. It never expires.</small>' : '') +
+    '<span class="lbl2">Expiring link</span><div class="seg3"><button class="btn" data-s="3600">1 hour</button><button class="btn" data-s="86400">1 day</button><button class="btn" data-s="604800">7 days</button></div>' +
+    '<input id="shLink" class="field" readonly hidden><small class="hint" id="shNote">Pick how long the link should work. It is copied for you.</small><div class="dlg-acts"><button class="btn" data-x="no">Close</button></div></div>');
+  const show = async (url, note) => { const f = $('#shLink'); f.value = url; f.hidden = false; f.select(); const ok = await copyText(url); const n = $('#shNote'); if (n) n.textContent = (ok ? 'Copied. ' : 'Copy the link above. ') + note; };
+  modalEl.onclick = async (e) => {
+    if (e.target.closest('[data-x]')) { closeModal(); return; }
+    const b = e.target.closest('[data-s]');
+    if (!b) return;
+    try {
+      if (b.dataset.s === 'public') return show(publicUrl(it.key), 'Anyone can open it.');
+      const r = await api('/api/share', { key: it.key, seconds: +b.dataset.s });
+      show(r.url, 'It works until ' + new Date(r.expires * 1000).toLocaleString() + '.');
+    } catch (err) { toast(err.message, 'err'); }
+  };
+}
+async function openMore(it) {
+  const rows = [];
+  if (isViewable(it.name)) rows.push(['preview', 'eye', 'Preview']);
+  if (isZip(it.name)) rows.push(['open', 'archive', 'Browse archive contents']);
+  rows.push(['download', 'download', 'Download'], ['share', 'link', 'Share link…']);
+  if (isPublicKey(it.key)) rows.push(['public', 'globe', 'Copy public link']);
+  if (isEditable(it.name, it.size)) rows.push(['edit', 'edit', 'Edit text']);
+  rows.push(['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['delete', 'trash', 'Move to trash', true]);
+  const a = await sheet(it.name, rows);
+  if (a === 'preview') preview(it);
+  else if (a === 'open') openArchive(it);
+  else if (a === 'download') download(it);
+  else if (a === 'share') openShare(it);
+  else if (a === 'public') copyPublic(it);
+  else if (a === 'edit') { preview(it); if (V) V.autoEdit = true; }
+  else if (a === 'move') moveFiles([it], 'move');
+  else if (a === 'copy') moveFiles([it], 'copy');
+  else if (a === 'delete') del(it);
+}
+
+/* --- viewer: gallery, players, PDF, text / code / Markdown, and the text editor --- */
+const MAXTXT = 2 * 1048576;
+function mdToHtml(src) {
+  const inline = (t) => esc(t)
+    .replace(/\x60([^\x60]+)\x60/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  const out = [], lines = src.replace(/\r\n?/g, '\n').split('\n');
+  let i = 0, para = [], list = '';
+  const endPara = () => { if (para.length) { out.push('<p>' + inline(para.join(' ')) + '</p>'); para = []; } };
+  const endList = () => { if (list) { out.push('</' + list + '>'); list = ''; } };
+  while (i < lines.length) {
+    const l = lines[i];
+    let m;
+    if (/^\x60\x60\x60/.test(l)) {
+      endPara(); endList();
+      const code = [];
+      i++;
+      while (i < lines.length && !/^\x60\x60\x60/.test(lines[i])) code.push(lines[i++]);
+      out.push('<pre class="code"><code>' + esc(code.join('\n')) + '</code></pre>');
+    } else if ((m = l.match(/^(#{1,6})\s+(.*)$/))) { endPara(); endList(); out.push('<h' + m[1].length + '>' + inline(m[2]) + '</h' + m[1].length + '>'); }
+    else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) { endPara(); endList(); out.push('<hr>'); }
+    else if ((m = l.match(/^>\s?(.*)$/))) { endPara(); endList(); out.push('<blockquote>' + inline(m[1]) + '</blockquote>'); }
+    else if ((m = l.match(/^\s*[-*+]\s+(.*)$/))) { endPara(); if (list !== 'ul') { endList(); out.push('<ul>'); list = 'ul'; } out.push('<li>' + inline(m[1]) + '</li>'); }
+    else if ((m = l.match(/^\s*\d+[.)]\s+(.*)$/))) { endPara(); if (list !== 'ol') { endList(); out.push('<ol>'); list = 'ol'; } out.push('<li>' + inline(m[1]) + '</li>'); }
+    else if (!l.trim()) { endPara(); endList(); }
+    else { endList(); para.push(l.trim()); }
+    i++;
+  }
+  endPara(); endList();
+  return out.join('');
+}
+function codeHtml(text) {
+  const lines = text.split('\n'), cap = 8000;
+  return '<pre class="code"><code>' + lines.slice(0, cap).map((l, n) => '<span class="ln">' + (n + 1) + '</span>' + esc(l)).join('\n') + '</code></pre>' + (lines.length > cap ? '<p class="vw-note">Showing the first ' + cap + ' lines.</p>' : '');
+}
+function guardClose() {
+  if (V && V.edit) { const t = $('#vwText'); if (t && t.value !== V.text && !window.confirm('Discard your unsaved changes?')) return false; }
+  return true;
+}
+function preview(it) {
+  const list = S.shown.filter((f) => !f.trash && isViewable(f.name));
+  const idx = list.findIndex((f) => f.key === it.key);
+  V = { list: idx >= 0 ? list : [it], i: Math.max(0, idx), edit: false, text: '', seq: 0, autoEdit: false };
+  openModal('', () => { V = null; });
+  modalEl.onclick = viewerClick;
+  showViewer();
+}
+function navV(d) { if (!V || V.list.length < 2 || V.edit) return; V.i = (V.i + d + V.list.length) % V.list.length; showViewer(); }
+async function showViewer() {
+  const cur = V.list[V.i], k = kindOf(cur.name), asText = isText(cur.name) && !PREV[k], my = ++V.seq, multi = V.list.length > 1;
+  V.edit = false; V.text = '';
+  modalEl.innerHTML = '<div class="pv vw arc" role="dialog" aria-modal="true"><div class="pv-h"><b title="' + esc(cur.key) + '">' + esc(cur.name) + '</b>' + (multi ? '<span class="vw-n">' + (V.i + 1) + ' / ' + V.list.length + '</span>' : '') + '<span id="vwActs" class="vw-acts"></span><button class="btn" data-v="dl">' + ico('download', 16) + '<span class="lbl"> Download</span></button><button class="ib" data-v="close" aria-label="Close">' + ico('x', 18) + '</button></div><div class="pv-b" id="vwBody"><div class="spin"></div></div>' + (multi ? '<button class="vw-nav prev" data-v="prev" aria-label="Previous">' + ico('chevL', 22) + '</button><button class="vw-nav next" data-v="next" aria-label="Next">' + ico('chev', 22) + '</button>' : '') + '</div>';
+  const body = $('#vwBody');
+  let sx = 0, sy = 0;
+  body.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  body.addEventListener('touchend', (e) => { const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy; if (Math.abs(dx) > 70 && Math.abs(dy) < 60) navV(dx < 0 ? 1 : -1); }, { passive: true });
+  try {
+    const r = await api('/api/url', { key: cur.key, mode: 'inline' });
+    if (!V || my !== V.seq) return;
+    const u = esc(r.url);
+    if (asText) {
+      const res = await fetch(r.url, { headers: { Range: 'bytes=0-' + (MAXTXT - 1) } });
+      if (!res.ok) throw new Error('Could not read the file (HTTP ' + res.status + ').');
+      const t = await res.text();
+      if (!V || my !== V.seq) return;
+      V.text = t;
+      body.className = 'pv-b txt';
+      body.innerHTML = /\.(md|markdown)$/i.test(cur.name) ? '<div class="md">' + mdToHtml(t) + (cur.size > MAXTXT ? '<p class="vw-note">Showing the first 2 MB.</p>' : '') + '</div>' : codeHtml(t) + (cur.size > MAXTXT ? '<p class="vw-note">Showing the first 2 MB.</p>' : '');
+      if (isEditable(cur.name, cur.size)) {
+        $('#vwActs').innerHTML = '<button class="btn" data-v="edit">' + ico('edit', 16) + '<span class="lbl"> Edit</span></button>';
+        if (V.autoEdit) { V.autoEdit = false; startEdit(); }
+      }
+    } else {
+      body.innerHTML = k === 'image' ? '<img src="' + u + '" alt="' + esc(cur.name) + '">'
+        : k === 'video' ? '<video src="' + u + '" controls playsinline autoplay></video>'
+        : k === 'audio' ? '<audio src="' + u + '" controls autoplay></audio>'
+        : '<iframe src="' + u + '" title="' + esc(cur.name) + '"></iframe>';
+      if (k === 'pdf') $('#vwActs').innerHTML = '<a class="btn" href="' + u + '" target="_blank" rel="noopener">Open</a>';
+    }
+  } catch (e) { if (V && my === V.seq && $('#vwBody')) $('#vwBody').innerHTML = '<div class="empty"><p>' + esc(e.message) + '</p></div>'; }
+}
+function startEdit() {
+  V.edit = true;
+  const body = $('#vwBody');
+  body.className = 'pv-b';
+  body.innerHTML = '<textarea id="vwText" class="editor" spellcheck="false"></textarea>';
+  $('#vwText').value = V.text; $('#vwText').focus();
+  $('#vwActs').innerHTML = '<button class="btn primary" data-v="save">' + ico('save', 16) + '<span class="lbl"> Save</span></button><button class="btn" data-v="cancel">Cancel</button>';
+}
+async function saveEdit() {
+  const cur = V.list[V.i], t = $('#vwText').value, btn = $('[data-v=save]');
+  btn.disabled = true;
+  try {
+    await api('/api/save', { key: cur.key, text: t });
+    cur.size = new TextEncoder().encode(t).length;
+    toast('Saved “' + cur.name + '”', 'ok');
+    load(true);
+    showViewer();
+  } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
+}
+function viewerClick(e) {
+  const b = e.target.closest('[data-v]');
+  if (!b || !V) return;
+  const a = b.dataset.v, cur = V.list[V.i];
+  if (a === 'close') { if (guardClose()) closeModal(); }
+  else if (a === 'prev') navV(-1);
+  else if (a === 'next') navV(1);
+  else if (a === 'dl') download(cur);
+  else if (a === 'edit') startEdit();
+  else if (a === 'save') saveEdit();
+  else if (a === 'cancel') { if (guardClose()) showViewer(); }
+}
+document.addEventListener('keydown', (e) => {
+  if (!V || modalEl.hidden) return;
+  const t = e.target;
+  if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
+  if (e.key === 'ArrowLeft') navV(-1); else if (e.key === 'ArrowRight') navV(1);
+});
+
+/* --- upload from a link (the Worker downloads it and streams it into R2) --- */
+function askUrl() {
+  return new Promise((resolve) => {
+    let val = null;
+    openModal('<form class="dlg" role="dialog" aria-modal="true"><h2>Save a link to R2</h2><p>The server downloads the file and saves it in ' + esc(S.prefix && !S.kind ? '/' + S.prefix : 'the top level') + '.</p><input id="uu" class="field" type="url" placeholder="https://example.com/file.zip" autocomplete="off"><input id="un" class="field" placeholder="File name (optional)" maxlength="120" autocomplete="off"><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Save to R2</button></div></form>', () => resolve(val));
+    $('#uu').focus();
+    $('form', modalEl).onsubmit = (e) => { e.preventDefault(); const u = $('#uu').value.trim(); if (!/^https?:\/\//i.test(u)) { $('#uu').focus(); return; } val = { url: u, name: $('#un').value.trim() }; closeModal(); };
+    modalEl.onclick = (e) => { if (e.target.closest('[data-x=no]')) closeModal(); };
+  });
+}
+async function uploadFromUrl() {
+  const v = await askUrl();
+  if (!v) return;
+  const j = startJob('Saving link to R2');
+  if (!j) return;
+  const ac = new AbortController();
+  j.onCancel = () => ac.abort();
+  try {
+    const res = await fetch('/api/fetch-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: v.url, name: v.name, prefix: S.kind ? '' : S.prefix }), signal: ac.signal });
+    if (!res.ok || !res.body) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Request failed (' + res.status + ')'); }
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = '', key = '', ok = false;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const ev = JSON.parse(line);
+        if (ev.error) throw new Error(ev.error);
+        if (ev.stage === 'start') { key = ev.key; $('#jobTitle').textContent = 'Saving ' + ev.key.split('/').pop(); }
+        if (ev.progress != null) updateJob(fmt(ev.progress) + (ev.size ? ' of ' + fmt(ev.size) : ''), ev.size ? Math.min(99, (ev.progress / ev.size) * 100) : null);
+        if (ev.done) { ok = true; key = ev.key; }
+      }
+    }
+    if (!ok) throw new Error('The connection closed before the file was saved.');
+    toast('Saved “' + key + '”', 'ok');
+  } catch (e) { if (!j.canceled) toast(e.message, 'err', 8000); else toast('Canceled.', 'info'); }
+  endJob(); load(true); loadUsage();
+}
+$('#btnUrl').onclick = uploadFromUrl;
+
+/* --- upload a folder, paste screenshots --- */
+$('#folderInput').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files);
+  enqueue(files.map((f) => { const rp = f.webkitRelativePath || '', i = rp.lastIndexOf('/'); return { file: f, rel: i > 0 ? rp.slice(0, i) : '' }; }));
+  e.target.value = '';
+});
+document.addEventListener('paste', (e) => {
+  const t = e.target;
+  if (!modalEl.hidden || (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))) return;
+  const files = Array.from((e.clipboardData && e.clipboardData.files) || []);
+  if (!files.length) return;
+  e.preventDefault();
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+  enqueue(files.map((f, n) => {
+    const generic = /^image\//.test(f.type) && /^image\.\w+$/i.test(f.name);
+    const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    return { file: generic ? new File([f], 'screenshot-' + stamp + (files.length > 1 ? '-' + (n + 1) : '') + '.' + ext, { type: f.type }) : f, rel: '' };
+  }));
+  toast('Uploading ' + files.length + (files.length === 1 ? ' pasted file' : ' pasted files') + '…', 'info');
+});
+
+/* --- resume interrupted uploads (the multipart upload id is remembered in this browser) --- */
+function renderResumeNote() {
+  const m = resumeLoad(), now = Date.now();
+  let dirty = false;
+  Object.keys(m).forEach((k) => { if (now - m[k].t > 7 * 86400e3) { delete m[k]; dirty = true; } });
+  if (dirty) resumeSave(m);
+  const active = new Set(queue.filter((q) => q.state === 'queued' || q.state === 'uploading' || q.state === 'error').map(fpOf));
+  const left = Object.keys(m).filter((k) => !active.has(k));
+  $('#resumeNote').hidden = !left.length;
+  if (left.length) $('#resumeText').innerHTML = '<b>' + left.length + (left.length === 1 ? ' unfinished upload' : ' unfinished uploads') + '</b>: ' + left.slice(0, 3).map((k) => esc(m[k].name)).join(', ') + (left.length > 3 ? '…' : '') + '. Choose the same file again and it continues where it stopped.';
+}
+$('#resumeDiscard').onclick = async () => {
+  const m = resumeLoad();
+  const active = new Set(queue.filter((q) => q.state === 'queued' || q.state === 'uploading' || q.state === 'error').map(fpOf));
+  for (const k of Object.keys(m)) { if (active.has(k)) continue; try { await api('/api/upload/abort', { key: m[k].key, uploadId: m[k].uploadId }); } catch (e) { /* already gone */ } delete m[k]; }
+  resumeSave(m); renderResumeNote();
+};
+window.addEventListener('online', () => {
+  let any = false;
+  queue.forEach((q) => { if (q.state === 'error') { q.state = 'queued'; q.error = ''; q.xhrs.clear(); any = true; } });
+  if (any) { renderUploads(); pump(); toast('Back online. Resuming uploads…', 'info'); }
+});
+
+/* --- selection bar buttons --- */
+const selItems = () => S.files.filter((f) => S.sel.has(f.key));
+$('#selDl').onclick = () => zipSelected(true);
+$('#selZip').onclick = () => zipSelected(false);
+$('#selMove').onclick = () => moveFiles(selItems(), 'move');
+$('#selCopy').onclick = () => moveFiles(selItems(), 'copy');
+$('#selDel').onclick = async () => { const l = selItems(); if (!l.length) return; if (await confirmDlg('Move ' + l.length + (l.length === 1 ? ' file' : ' files') + ' to trash?', 'You can restore them for ' + BOOT.trashDays + ' days.', 'Move to trash')) trashFiles(l); };
+$('#selRestore').onclick = () => restoreItems(selItems());
+$('#selPurge').onclick = () => purgeItems(selItems());
+
+/* --- installable app --- */
+if ('serviceWorker' in navigator) {
+  const regSw = () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); };
+  if (document.readyState === 'complete') regSw(); else window.addEventListener('load', regSw);
+}
+renderResumeNote();
 
 /* ---------- start ---------- */
 applyView();

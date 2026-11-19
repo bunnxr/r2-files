@@ -14,3 +14,8 @@ run_worker_first = true   # the Worker checks Access and adds security headers b
 [[routes]]
 pattern = "upload.bunnxr.com"
 custom_domain = true
+
+# Public files and expiring share links (same Worker, no Access in front of this hostname)
+[[routes]]
+pattern = "r2.bunnxr.com"
+custom_domain = true

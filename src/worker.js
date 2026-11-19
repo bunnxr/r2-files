@@ -6,17 +6,26 @@ import { r2, listAll, bucketUsage, r2Error } from "./r2.js";
 import { verifyAccess } from "./access.js";
 import { uploadInit, uploadComplete, deleteFolderBatch, contentDisposition } from "./uploads.js";
 import { securityPolicy, notConfiguredPage } from "./pages.js";
+import { servePublic, shareUrl } from "./public.js";
+import * as ops from "./fileops.js";
+import { fetchToR2 } from "./urlfetch.js";
 
 // ---------------------------------------------------------------------
 //  Request router
 // ---------------------------------------------------------------------
-async function handle(request, env) {
+async function handle(request, env, ctx) {
   const c = getConfig(env);
   const url = new URL(request.url);
   const isApi = url.pathname.startsWith("/api/");
 
+  const isPublicHost = !!c.PUBLIC_HOST && url.hostname.toLowerCase() === c.PUBLIC_HOST;
   const problems = configProblems(c);
-  if (problems.length) return isApi ? json({ error: "Not configured yet: edit the CONFIG block." }, 503) : notConfiguredPage(problems);
+  if (problems.length) {
+    if (isPublicHost) return new Response("Not configured yet.", { status: 503 });
+    return isApi ? json({ error: "Not configured yet: edit the CONFIG block." }, 503) : notConfiguredPage(problems);
+  }
+  // The public hostname only ever serves files (public folders and signed share links): no UI, no API, no login
+  if (isPublicHost) return servePublic(request, c, url);
 
   if (!(await verifyAccess(request, c))) {
     return isApi ? json({ error: "Access denied." }, 403) : new Response("Access denied", { status: 403 });
@@ -24,6 +33,10 @@ async function handle(request, env) {
 
   if (!isApi) {
     if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
+    if (url.pathname === "/manifest.webmanifest") {
+      const icon = (src, sizes, extra) => Object.assign({ src, sizes, type: "image/png" }, extra);
+      return new Response(JSON.stringify({ name: c.SITE_TITLE, short_name: c.SITE_TITLE.slice(0, 12), start_url: "/", scope: "/", display: "standalone", background_color: "#f4f6fb", theme_color: safeColor(c.ACCENT, "#0d6efd"), icons: [icon("/icon-192.png", "192x192"), icon("/icon-512.png", "512x512"), icon("/icon-maskable-512.png", "512x512", { purpose: "maskable" })] }), { headers: { "content-type": "application/manifest+json", "cache-control": "no-store" } });
+    }
     if (!env.ASSETS) return new Response("Static assets binding missing. Check the [assets] section in wrangler.toml.", { status: 500 });
     const res = await env.ASSETS.fetch(request);
     const h = new Headers(res.headers);
@@ -44,10 +57,10 @@ async function handle(request, env) {
       const prefix = url.searchParams.get("prefix") ?? "";
       if (!validPrefix(prefix)) throw new HttpError(400, "Invalid folder path.");
       const r = await listAll(c, { prefix, delimiter: "/", maxPages: 20 });
-      return json({ prefix, folders: r.folders, files: r.files.filter((f) => f.key !== prefix), truncated: r.truncated });
+      return json({ prefix, folders: r.folders.filter((f) => f !== ".trash/"), files: r.files.filter((f) => f.key !== prefix), truncated: r.truncated });
     }
     case "GET /api/config":
-      return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0d6efd"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW });
+      return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0d6efd"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW, publicHost: c.PUBLIC_HOST, publicFolders: c.PUBLIC_FOLDER_LIST, trashDays: c.TRASH_DAYS });
     case "GET /api/usage": {
       const u = await bucketUsage(c);
       return json({ used: u.used, count: u.count, partial: u.partial, byType: u.byType });
@@ -56,7 +69,7 @@ async function handle(request, env) {
       const type = url.searchParams.get("type") || "recent";
       if (type !== "recent" && !TYPES.includes(type)) throw new HttpError(400, "Unknown file type.");
       const u = await bucketUsage(c);
-      const all = u.files.filter((f) => !f.key.endsWith("/") && (type === "recent" || typeOf(f.key) === type));
+      const all = u.files.filter((f) => !f.key.endsWith("/") && (type === "recent" ? typeOf(f.key) !== "trash" : typeOf(f.key) === type));
       all.sort((a, z) => (a.modified < z.modified ? 1 : a.modified > z.modified ? -1 : 0));
       const limit = type === "recent" ? 100 : 500;
       return json({ type, total: all.length, files: all.slice(0, limit), truncated: all.length > limit || u.partial });
@@ -104,15 +117,38 @@ async function handle(request, env) {
       const u = await presign(c, "GET", b.key, { query: { "response-content-disposition": contentDisposition(b.mode, b.key) } });
       return json({ url: u, expiresIn: c.URL_EXPIRY_SECONDS });
     }
+    case "POST /api/share": {
+      const b = await readJson(request);
+      const seconds = Math.floor(Number(b.seconds));
+      if (!validKey(b.key, "file") || b.key.startsWith(".trash/")) throw new HttpError(400, "Invalid file.");
+      if (!(seconds >= 60 && seconds <= 604800)) throw new HttpError(400, "Links can last between 1 minute and 7 days.");
+      return json(await shareUrl(c, b.key, seconds));
+    }
+    case "POST /api/move":
+      return json(await ops.moveBatch(c, await readJson(request)));
+    case "POST /api/trash":
+      return json(await ops.trashBatch(c, await readJson(request)));
+    case "POST /api/trash-folder":
+      return json(await ops.trashFolderBatch(c, await readJson(request)));
+    case "POST /api/restore":
+      return json(await ops.restoreBatch(c, await readJson(request)));
+    case "POST /api/empty-trash":
+      return json(await ops.emptyTrashBatch(c));
+    case "POST /api/save":
+      return json(await ops.saveText(c, await readJson(request)));
+    case "POST /api/upload/parts":
+      return json(await ops.listParts(c, await readJson(request)));
+    case "POST /api/fetch-url":
+      return fetchToR2(c, ctx, await readJson(request));
     default:
       return json({ error: "Not found." }, 404);
   }
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
-      return await handle(request, env);
+      return await handle(request, env, ctx);
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
       if (status >= 500) console.error("[file-manager]", e && e.stack ? e.stack : e);

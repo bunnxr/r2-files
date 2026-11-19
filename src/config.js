@@ -26,8 +26,13 @@ const CONFIG = {
   CHUNK_RETRIES: 3,                 // tries per chunk before the upload fails
   URL_EXPIRY_SECONDS: 3600,         // lifetime of presigned upload/download URLs (max 604800)
 
+  // ---- Public and share links
+  PUBLIC_HOST: "r2.bunnxr.com",     // hostname that serves public files and expiring share links. Attach it to THIS Worker (not to the bucket). Empty = use plain R2 signed links instead
+  PUBLIC_FOLDERS: "public/",        // comma-separated folders whose files anyone can open at https://PUBLIC_HOST/<path>
+  TRASH_DAYS: 30,                   // shown in the UI; use the same number in the R2 lifecycle rule for ".trash/"
+
   // ---- Look and feel
-  SITE_TITLE: "r2 by bunnxr",         // shown in the header and browser tab
+  SITE_TITLE: "My Files",           // shown in the header and browser tab
   ACCENT: "#0d6efd",                // accent colour (hex): buttons, links, highlights
   DEFAULT_VIEW: "list",             // "list" (table) or "grid" (cards); the visitor's choice is remembered
 
@@ -39,7 +44,7 @@ const CONFIG = {
 // ---------------------------------------------------------------------
 //  Config loading
 // ---------------------------------------------------------------------
-const NUM_KEYS = ["CHUNK_SIZE", "PARALLEL_UPLOADS", "CHUNK_RETRIES", "URL_EXPIRY_SECONDS"];
+const NUM_KEYS = ["TRASH_DAYS", "CHUNK_SIZE", "PARALLEL_UPLOADS", "CHUNK_RETRIES", "URL_EXPIRY_SECONDS"];
 
 function getConfig(env) {
   const c = {};
@@ -55,6 +60,8 @@ function getConfig(env) {
   c.CHUNK_RETRIES = Math.min(10, Math.max(1, Math.floor(c.CHUNK_RETRIES)));
   c.URL_EXPIRY_SECONDS = Math.min(604800, Math.max(60, Math.floor(c.URL_EXPIRY_SECONDS)));
   c.DEFAULT_VIEW = c.DEFAULT_VIEW === "list" ? "list" : "grid";
+  c.PUBLIC_HOST = c.PUBLIC_HOST.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  c.PUBLIC_FOLDER_LIST = c.PUBLIC_FOLDERS.split(",").map((p) => p.trim().replace(/^\/+/, "")).filter((p) => p && !p.startsWith(".trash")).map((p) => p.replace(/\/*$/, "/"));
   return c;
 }
 

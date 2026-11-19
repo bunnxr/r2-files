@@ -65,8 +65,9 @@ const TYPE_EXT = {
   archive: "zip rar 7z tar gz tgz bz2 xz",
   doc: "pdf doc docx odt rtf txt md pages ppt pptx key xls xlsx csv tsv ods numbers",
 };
-const TYPES = ["image", "video", "audio", "doc", "archive", "other"];
+const TYPES = ["image", "video", "audio", "doc", "archive", "other", "trash"];
 function typeOf(key) {
+  if (key.startsWith(".trash/")) return "trash";
   const n = key.split("/").pop();
   const i = n.lastIndexOf(".");
   const e = i > 0 ? n.slice(i + 1).toLowerCase() : "";

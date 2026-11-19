@@ -43,4 +43,4 @@ async function presign(c, method, key, { query = {}, headers = {}, expires, now 
   return c.ENDPOINT + path + "?" + canonicalQuery + "&X-Amz-Signature=" + signature;
 }
 
-export { presign, rfc3986 };
+export { presign, rfc3986, encPath };
