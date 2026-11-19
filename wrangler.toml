@@ -12,7 +12,7 @@ binding = "ASSETS"
 run_worker_first = true   # the Worker checks Access and adds security headers before serving files
 
 [[routes]]
-pattern = "upload.bunnxr.com"
+pattern = "files.bunnxr.com"
 custom_domain = true
 
 # Public files and expiring share links (same Worker, no Access in front of this hostname)
