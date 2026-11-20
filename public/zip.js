@@ -95,7 +95,7 @@ export async function buildZip(items, hooks) {
   for (let n = 0; n < items.length; n++) {
     const it = items[n];
     if (hooks.canceled()) throw new Error('Canceled');
-    const res = await fetch(await it.getUrl());
+    const res = it.file ? { ok: true, body: it.file.stream() } : await fetch(await it.getUrl());
     if (!res.ok) throw new Error('Could not read "' + it.zipName + '" (HTTP ' + res.status + ').');
     const nameB = te.encode(it.zipName);
     const method = NOCOMP.test(it.zipName) ? 0 : 8;

@@ -147,6 +147,13 @@ async function handle(request, env, ctx) {
       if (!validKey(b.key, "file")) throw new HttpError(400, "Invalid file.");
       return json(await removeLink(c, b.key));
     }
+    case "POST /api/new-text":
+      return json(await ops.newText(c, await readJson(request)));
+    case "GET /api/largest": {
+      const u = await bucketUsage(c);
+      const files = u.files.filter((f) => !f.key.endsWith("/") && !f.key.startsWith(".links/")).sort((a, z) => z.size - a.size).slice(0, 25).map((f) => ({ key: f.key, size: f.size, modified: f.modified }));
+      return json({ files, partial: u.partial });
+    }
     case "POST /api/move":
       return json(await ops.moveBatch(c, await readJson(request)));
     case "POST /api/trash":

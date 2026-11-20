@@ -50,16 +50,19 @@ const P = {
   save: '<path d="M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
   chevL: '<path d="m15 6-6 6 6 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  database: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+  folderFill: '<path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   broom: '<path d="M4 20h16M7 20l1-9h8l1 9M10 11V4h4v7"/>'
 };
-const ico = (n, s) => '<svg class="i" width="' + (s || 18) + '" height="' + (s || 18) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + P[n] + '</svg>';
+const ico = (n, s) => { const f = /Fill$/.test(n); return '<svg class="i" width="' + (s || 18) + '" height="' + (s || 18) + '" viewBox="0 0 24 24" fill="' + (f ? 'currentColor' : 'none') + '" stroke="' + (f ? 'none' : 'currentColor') + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + P[n] + '</svg>'; };
 const EXT = { image: 'jpg jpeg png gif webp avif svg bmp heic heif ico tif tiff', video: 'mp4 mov m4v webm mkv avi wmv', audio: 'mp3 wav flac aac m4a ogg opus', pdf: 'pdf', archive: 'zip rar 7z tar gz tgz bz2 xz', code: 'js ts jsx tsx json html css py rb go rs java c cpp h php sh sql yml yaml xml md', sheet: 'xls xlsx csv tsv ods numbers', doc: 'doc docx odt rtf txt pages ppt pptx key' };
-const KC = { folder: '#3b82f6', image: '#10b981', video: '#ec4899', audio: '#8b5cf6', pdf: '#ef4444', archive: '#f59e0b', code: '#0ea5e9', sheet: '#22a06b', doc: '#3b82f6', file: '#94a3b8' };
+const KC = { folder: '#4c9aff', image: '#10b981', video: '#ec4899', audio: '#8b5cf6', pdf: '#ef4444', archive: '#f59e0b', code: '#0ea5e9', sheet: '#22a06b', doc: '#3b82f6', file: '#94a3b8' };
 const GLYPH = { folder: 'folder', image: 'image', video: 'video', audio: 'audio', pdf: 'doc', archive: 'archive', code: 'code', sheet: 'sheet', doc: 'doc', file: 'file' };
 const PREV = { image: 1, video: 1, audio: 1, pdf: 1 };
 const kindOf = (name) => { const e = name.indexOf('.') < 0 ? '' : name.split('.').pop().toLowerCase(); for (const k in EXT) if ((' ' + EXT[k] + ' ').indexOf(' ' + e + ' ') >= 0 && e) return k; return 'file'; };
-const tile = (k, s) => '<span class="tile" style="--c:' + KC[k] + '">' + ico(GLYPH[k], s || 22) + '</span>';
+const tile = (k, s) => (k === 'folder' ? '<span class="tile fold" style="--c:' + KC[k] + '">' + ico('folderFill', Math.round((s || 22) * 1.45)) + '</span>' : '<span class="tile" style="--c:' + KC[k] + '">' + ico(GLYPH[k], s || 22) + '</span>');
 
 /* ---------- state ---------- */
 const S = { sel: new Set(), prefix: '', folders: [], files: [], shown: [], loading: true, error: '', q: '', by: 'name', dir: 1, view: ls.get('fm-view') || BOOT.view, seq: 0 };
@@ -116,8 +119,6 @@ function applyView() { $('#list').dataset.view = S.view; $('#btnView').innerHTML
 $('#btnView').onclick = () => { S.view = S.view === 'grid' ? 'list' : 'grid'; ls.set('fm-view', S.view); applyView(); };
 $('#logo').innerHTML = ico('cloud', 21);
 $('#searchIco').innerHTML = ico('search', 17);
-$('#folderIco').innerHTML = ico('folderPlus', 18);
-$('#uploadIco').innerHTML = ico('upload', 18);
 $('#upToggle').innerHTML = ico('down', 18);
 $('#upClear').innerHTML = ico('broom', 17);
 
@@ -125,7 +126,7 @@ $('#upClear').innerHTML = ico('broom', 17);
 const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other', 'trash'];
 const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash' };
 const CAT = { image: ['Images', '#3b82f6', 'image'], video: ['Videos', '#ef4444', 'video'], audio: ['Audio', '#8b5cf6', 'audio'], doc: ['Documents', '#22a06b', 'doc'], archive: ['Archives', '#f59e0b', 'archive'], other: ['Other', '#64748b', 'file'], trash: ['Trash', '#94a3b8', 'trash'] };
-const NAV = [['', 'All files', 'folder'], ['recent', 'Recent', 'clock'], ['image', 'Images', 'image'], ['video', 'Videos', 'video'], ['audio', 'Audio', 'audio'], ['doc', 'Documents', 'doc'], ['archive', 'Archives', 'archive'], ['other', 'Other', 'file'], ['trash', 'Trash', 'trash']];
+const NAV = [['', 'Files', 'folder'], ['trash', 'Trash', 'trash']];
 S.kind = ''; S.usage = null; S.total = 0; S.shownFolders = [];
 $('#sortDir').innerHTML = ico('sort', 17);
 
@@ -188,9 +189,6 @@ async function loadUsage() {
     S.usage = u;
     $('#uBig').textContent = fmt(u.used);
     $('#uSub').textContent = u.count + (u.count === 1 ? ' file' : ' files') + (u.partial ? ' (at least)' : '');
-    const keys = Object.keys(CAT).filter((k) => u.byType[k] && u.byType[k].count).sort((a, b) => u.byType[b].size - u.byType[a].size);
-    $('#uSeg').innerHTML = u.used ? keys.map((k) => '<i title="' + CAT[k][0] + '" style="width:' + Math.max(1.5, (u.byType[k].size / u.used) * 100) + '%;background:' + CAT[k][1] + '"></i>').join('') : '';
-    $('#uTypes').innerHTML = keys.length ? keys.map((k) => '<li><a href="#view=' + k + '"><span class="tile" style="--c:' + CAT[k][1] + '">' + ico(CAT[k][2], 18) + '</span><span class="t-n"><b>' + CAT[k][0] + '</b><small>' + u.byType[k].count + (u.byType[k].count === 1 ? ' file' : ' files') + '</small></span><span class="t-s">' + fmt(u.byType[k].size) + '</span></a></li>').join('') : '<li class="muted">Nothing stored yet</li>';
     renderNav();
   } catch (e) { $('#uBig').textContent = '–'; $('#uSub').textContent = e.message; }
 }
@@ -301,7 +299,7 @@ $('#list').addEventListener('click', (e) => {
   const row = e.target.closest('[data-i]'); if (!row) return;
   const it = S.shown[+row.dataset.i]; if (!it) return;
   if (e.target.closest('[data-sel]')) { toggleSel(it.key, e.target.checked); return; }
-  if (act) { const a = act.dataset.act; if (a === 'download') download(it); else if (a === 'preview') preview(it); else if (a === 'share') { if (isPublicKey(it.key)) copyPublic(it); else openShare(it); } else if (a === 'more') openMore(it); else if (a === 'restore') restoreItems([it]); else if (a === 'purge') purgeItems([it]); return; }
+  if (act) { const a = act.dataset.act; if (a === 'download') download(it); else if (a === 'preview') preview(it); else if (a === 'share') { if (isPublicKey(it.key)) copyPublic(it); else openShare(it); } else if (a === 'more') { const r = act.getBoundingClientRect(); openMore(it, r.left, r.bottom + 4); } else if (a === 'restore') restoreItems([it]); else if (a === 'purge') purgeItems([it]); return; }
   if (it.trash) return;
   if (isViewable(it.name)) preview(it); else if (isZip(it.name)) openArchive(it);
 });
@@ -315,12 +313,6 @@ async function download(it) {
     document.body.appendChild(a); a.click(); a.remove();
   } catch (e) { toast(e.message, 'err'); }
 }
-$('#btnFolder').onclick = async () => {
-  const name = await askFolder();
-  if (!name) return;
-  try { await api('/api/mkdir', { prefix: S.prefix, name: name }); toast('Folder created', 'ok'); load(true); }
-  catch (e) { toast(e.message, 'err'); }
-};
 
 /* ---------- uploads ---------- */
 const queue = [];
@@ -526,12 +518,13 @@ async function walk(entry, path, out) {
 }
 let dragN = 0;
 const hasFiles = (e) => e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0;
-window.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragN++; $('#drop').classList.add('on'); });
+window.addEventListener('dragenter', (e) => { if (!hasFiles(e) || !modalEl.hidden) return; e.preventDefault(); dragN++; $('#drop').classList.add('on'); });
 window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
 window.addEventListener('dragleave', (e) => { if (!hasFiles(e)) return; dragN = Math.max(0, dragN - 1); if (!dragN) $('#drop').classList.remove('on'); });
 window.addEventListener('drop', async (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault(); dragN = 0; $('#drop').classList.remove('on');
+  if (!modalEl.hidden) return;
   const dt = e.dataTransfer;
   const ents = [];
   Array.from(dt.items || []).forEach((it) => { const en = it.kind === 'file' && it.webkitGetAsEntry ? it.webkitGetAsEntry() : null; if (en) ents.push(en); });
@@ -747,8 +740,6 @@ const isEditable = (n, size) => isText(n) && size <= 1048576;
 const isPublicKey = (key) => !!BOOT.publicHost && (BOOT.publicFolders || []).some((p) => key.indexOf(p) === 0);
 const publicUrl = (key) => 'https://' + BOOT.publicHost + '/' + key.split('/').map(encodeURIComponent).join('/');
 const tid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-$('#folderUpIco').innerHTML = ico('folder', 18);
-$('#urlIco').innerHTML = ico('globe', 18);
 
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); return true; } catch (e) { /* try the old way */ }
@@ -908,15 +899,18 @@ async function openShare(it) {
     } catch (err) { toast(err.message, 'err'); }
   };
 }
-async function openMore(it) {
+function fileRows(it) {
+  if (it.trash) return [['restore', 'retry', 'Restore'], ['purge', 'trash', 'Delete forever', true]];
   const rows = [];
   if (isViewable(it.name)) rows.push(['preview', 'eye', 'Preview']);
   if (isZip(it.name)) rows.push(['open', 'archive', 'Browse archive contents']);
-  rows.push(['download', 'download', 'Download'], ['share', 'link', 'Share link…']);
+  rows.push(['download', 'download', 'Download'], '-', ['share', 'link', 'Share link…']);
   if (isPublicKey(it.key)) rows.push(['public', 'globe', 'Copy public link']);
   if (isEditable(it.name, it.size)) rows.push(['edit', 'edit', 'Edit text']);
-  rows.push(['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['delete', 'trash', 'Move to trash', true]);
-  const a = await sheet(it.name, rows);
+  rows.push('-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['delete', 'trash', 'Move to trash', true]);
+  return rows;
+}
+function runFileAction(a, it) {
   if (a === 'preview') preview(it);
   else if (a === 'open') openArchive(it);
   else if (a === 'download') download(it);
@@ -926,7 +920,10 @@ async function openMore(it) {
   else if (a === 'move') moveFiles([it], 'move');
   else if (a === 'copy') moveFiles([it], 'copy');
   else if (a === 'delete') del(it);
+  else if (a === 'restore') restoreItems([it]);
+  else if (a === 'purge') purgeItems([it]);
 }
+async function openMore(it, x, y) { const a = await showMenu(it.name, fileRows(it), x, y); if (a) runFileAction(a, it); }
 
 /* --- viewer: gallery, players, PDF, text / code / Markdown, and the text editor --- */
 const MAXTXT = 2 * 1048576;
@@ -1091,7 +1088,6 @@ async function uploadFromUrl() {
   } catch (e) { if (!j.canceled) toast(e.message, 'err', 8000); else toast('Canceled.', 'info'); }
   endJob(); load(true); loadUsage();
 }
-$('#btnUrl').onclick = uploadFromUrl;
 
 /* --- upload a folder, paste screenshots --- */
 $('#folderInput').addEventListener('change', (e) => {
@@ -1153,6 +1149,173 @@ if ('serviceWorker' in navigator) {
   if (document.readyState === 'complete') regSw(); else window.addEventListener('load', regSw);
 }
 renderResumeNote();
+
+/* ---------- New menu, right-click / long-press menus, new text + zip files, largest files ---------- */
+$('#newIco').innerHTML = ico('plus', 20);
+$('#uIco').innerHTML = ico('database', 22);
+$('#uGo').innerHTML = ico('chev', 18);
+$('#usageCard').onclick = () => openLargest();
+
+let ctxEl = null, lastNative = 0, lastHold = 0, suppressClick = 0;
+function closeCtx() { if (ctxEl) { ctxEl.remove(); ctxEl = null; } }
+function popMenu(rows, x, y) {
+  return new Promise((resolve) => {
+    closeCtx();
+    const el = document.createElement('div');
+    el.className = 'ctx'; el.setAttribute('role', 'menu');
+    el.innerHTML = rows.map((r) => (r === '-' ? '<hr>' : '<button role="menuitem" data-pick="' + r[0] + '"' + (r[3] ? ' class="danger"' : '') + '>' + ico(r[1], 18) + '<span>' + esc(r[2]) + '</span></button>')).join('');
+    document.body.appendChild(el); ctxEl = el;
+    el.style.left = Math.max(8, Math.min(x, innerWidth - el.offsetWidth - 8)) + 'px';
+    el.style.top = Math.max(8, Math.min(y, innerHeight - el.offsetHeight - 8)) + 'px';
+    const done = (v) => { document.removeEventListener('mousedown', away, true); document.removeEventListener('keydown', key, true); window.removeEventListener('scroll', away, true); window.removeEventListener('resize', away); if (ctxEl === el) closeCtx(); resolve(v); };
+    const away = (e) => { if (!el.contains(e.target)) done(null); };
+    const key = (e) => { if (e.key === 'Escape') done(null); };
+    el.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) done(b.dataset.pick); });
+    document.addEventListener('mousedown', away, true); document.addEventListener('keydown', key, true); window.addEventListener('scroll', away, true); window.addEventListener('resize', away);
+  });
+}
+const isPhone = () => matchMedia('(max-width:759px)').matches || matchMedia('(pointer:coarse)').matches;
+// desktop: a small menu next to the pointer; phones: a bottom sheet
+function showMenu(title, rows, x, y) { return isPhone() || x == null ? sheet(title, rows.filter((r) => r !== '-')) : popMenu(rows, x, y); }
+
+const newRows = () => [['upload', 'upload', 'Upload files'], ['uploadDir', 'folder', 'Upload folder'], '-', ['folder', 'folderPlus', 'New folder'], ['text', 'edit', 'New text file'], ['zip', 'archive', 'New zip file'], '-', ['url', 'globe', 'Save from a link']];
+function doNew(a) { if (a === 'upload') $('#file').click(); else if (a === 'uploadDir') $('#folderInput').click(); else if (a === 'folder') newFolder(); else if (a === 'text') newTextFile(); else if (a === 'zip') newZipFile(); else if (a === 'url') uploadFromUrl(); }
+async function openNew(x, y) { const a = await showMenu('Create or upload', newRows(), x, y); if (a) doNew(a); }
+$('#btnNew').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(); openNew(r.left, r.bottom + 6); };
+$('#fab').onclick = () => openNew();
+
+async function newFolder() {
+  const name = await askFolder();
+  if (!name) return;
+  try { await api('/api/mkdir', { prefix: S.kind ? '' : S.prefix, name: name }); toast('Folder created', 'ok'); load(true); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+/* --- right-click (desktop) and press-and-hold (phones) --- */
+async function ctxItem(it, x, y) {
+  if (S.sel.size > 1 && S.sel.has(it.key) && !it.trash) {
+    const a = await showMenu(S.sel.size + ' files selected', [['dl', 'download', 'Download as zip'], '-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['del', 'trash', 'Move to trash', true], '-', ['clear', 'x', 'Clear selection']], x, y);
+    if (a === 'dl') zipSelected(true); else if (a === 'move') moveFiles(selItems(), 'move'); else if (a === 'copy') moveFiles(selItems(), 'copy'); else if (a === 'del') $('#selDel').click(); else if (a === 'clear') $('#selClear').click();
+    return;
+  }
+  const a = await showMenu(it.name, fileRows(it), x, y);
+  if (a) runFileAction(a, it);
+}
+async function ctxFolder(f, x, y) {
+  const a = await showMenu(f.name, [['open', 'folder', 'Open'], '-', ['del', 'trash', 'Move to trash', true]], x, y);
+  if (a === 'open') go(f.key); else if (a === 'del') del(f);
+}
+async function ctxEmpty(x, y) {
+  if (S.kind === 'trash') { const a = await showMenu('Trash', [['empty', 'trash', 'Empty trash', true]], x, y); if (a) emptyTrash(); return; }
+  const a = await showMenu('Create or upload', newRows(), x, y);
+  if (a) doNew(a);
+}
+const NOCTX = 'input,textarea,select,button,a,label,.nav,.navcard,.usage,.selbar,.note,.thead,.searchbar,.sec-h,.crumbs,.ctx,.sheet,.uploads,.job,.fab,#modal';
+function ctxAt(t, x, y) {
+  if (!t || !t.closest) return false;
+  const row = t.closest('#list [data-i]'), fc = t.closest('#folders [data-f]');
+  if (row) { const it = S.shown[+row.dataset.i]; if (it) { ctxItem(it, x, y); return true; } return false; }
+  if (fc) { const f = S.shownFolders[+fc.dataset.f]; if (f) { ctxFolder(f, x, y); return true; } return false; }
+  if (t.closest(NOCTX)) return false;
+  ctxEmpty(x, y);
+  return true;
+}
+document.addEventListener('contextmenu', (e) => {
+  if (!modalEl.hidden || (e.target.closest && e.target.closest('input,textarea,.ctx'))) return;
+  if (Date.now() - lastHold < 900) { e.preventDefault(); return; } // the press-and-hold already opened a menu
+  if (ctxAt(e.target, e.clientX, e.clientY)) { e.preventDefault(); lastNative = Date.now(); }
+});
+let lp = null, lpPos = null;
+document.addEventListener('touchstart', (e) => {
+  if (e.touches.length !== 1 || !modalEl.hidden) return;
+  const t = e.touches[0], tg = e.target;
+  if (!tg.closest || tg.closest('input,textarea,select,.ctx,.sheet,.selbar,.thead,.nav,.navcard,.usage,.fab,.searchbar,.uploads,.job')) return;
+  lpPos = [t.clientX, t.clientY];
+  lp = setTimeout(() => { lp = null; if (Date.now() - lastNative < 900) return; if (ctxAt(tg, lpPos[0], lpPos[1])) { lastHold = Date.now(); suppressClick = Date.now() + 700; if (navigator.vibrate) navigator.vibrate(12); } }, 520);
+}, { passive: true });
+document.addEventListener('touchmove', (e) => { if (lp && lpPos) { const t = e.touches[0]; if (Math.hypot(t.clientX - lpPos[0], t.clientY - lpPos[1]) > 10) { clearTimeout(lp); lp = null; } } }, { passive: true });
+['touchend', 'touchcancel'].forEach((n) => document.addEventListener(n, () => { clearTimeout(lp); lp = null; }, { passive: true }));
+document.addEventListener('click', (e) => { if (Date.now() < suppressClick) { e.stopPropagation(); e.preventDefault(); } }, true);
+
+/* --- new text file --- */
+function newTextFile() {
+  const prefix = S.kind ? '' : S.prefix;
+  openModal('<form class="dlg wide" role="dialog" aria-modal="true"><h2>New text file</h2><p>It will be saved in ' + esc(prefix ? '/' + prefix : 'the top level') + '.</p><input id="ntName" class="field" value="untitled.txt" maxlength="120" autocomplete="off"><textarea id="ntText" class="field area" spellcheck="false" placeholder="Start typing…"></textarea><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Create</button></div></form>');
+  const nm = $('#ntName'), dot = nm.value.indexOf('.');
+  nm.focus(); nm.setSelectionRange(0, dot > 0 ? dot : nm.value.length);
+  $('form', modalEl).onsubmit = async (e) => {
+    e.preventDefault();
+    const name = nm.value.trim(), btn = $('button[type=submit]', modalEl);
+    if (!name) { nm.focus(); return; }
+    btn.disabled = true;
+    try { const r = await api('/api/new-text', { prefix, name, text: $('#ntText').value }); closeModal(); toast('Created “' + r.key.split('/').pop() + '”', 'ok'); load(true); loadUsage(); }
+    catch (err) { toast(err.message, 'err'); btn.disabled = false; }
+  };
+  modalEl.onclick = (e) => { if (e.target.closest('[data-x=no]')) closeModal(); };
+}
+
+/* --- new zip file: pick files, they are zipped in the browser and uploaded as one zip --- */
+function newZipFile() {
+  if (!HAS_STREAMS) { toast('Your browser is too old for zipping (needs Chrome 103, Safari 16.4 or Firefox 113 or newer).', 'err'); return; }
+  const prefix = S.kind ? '' : S.prefix, picked = [];
+  openModal('<form class="dlg wide" role="dialog" aria-modal="true"><h2>New zip file</h2><p>Add files and they are zipped and saved in ' + esc(prefix ? '/' + prefix : 'the top level') + '.</p><input id="nzName" class="field" value="archive.zip" maxlength="120" autocomplete="off"><div class="zdrop" id="zDrop"><b>Drop files or folders here</b><span><button type="button" class="link" data-z="files">Choose files</button> or <button type="button" class="link" data-z="dir">choose a folder</button></span></div><div class="zlist" id="zList"></div><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Create zip</button></div></form>');
+  const draw = () => {
+    const el = $('#zList'); if (!el) return;
+    el.innerHTML = picked.map((p, i) => '<div class="zr"><span class="zn" title="' + esc(p.path) + '">' + esc(p.path) + '</span><small>' + fmt(p.file.size) + '</small><button type="button" class="ib" data-zr="' + i + '" aria-label="Remove">' + ico('x', 16) + '</button></div>').join('') + (picked.length ? '<small class="hint">' + picked.length + (picked.length === 1 ? ' file, ' : ' files, ') + fmt(picked.reduce((n, p) => n + p.file.size, 0)) + '</small>' : '');
+  };
+  const add = (list) => { list.forEach((x) => picked.push({ file: x.file, path: (x.rel || '') + x.file.name })); draw(); };
+  const mk = (dir) => {
+    const i = document.createElement('input'); i.type = 'file'; i.multiple = true; if (dir) i.webkitdirectory = true;
+    i.onchange = () => add(Array.from(i.files).map((f) => ({ file: f, rel: dir && f.webkitRelativePath ? f.webkitRelativePath.slice(0, f.webkitRelativePath.lastIndexOf('/') + 1) : '' })));
+    return i;
+  };
+  const zd = $('#zDrop');
+  ['dragenter', 'dragover'].forEach((n) => zd.addEventListener(n, (e) => { e.preventDefault(); e.stopPropagation(); zd.classList.add('on'); }));
+  zd.addEventListener('dragleave', () => zd.classList.remove('on'));
+  zd.addEventListener('drop', async (e) => {
+    e.preventDefault(); e.stopPropagation(); zd.classList.remove('on');
+    const dt = e.dataTransfer, ents = Array.from(dt.items || []).map((it) => (it.kind === 'file' && it.webkitGetAsEntry ? it.webkitGetAsEntry() : null)).filter(Boolean);
+    if (ents.length) { const out = []; for (const en of ents) await walk(en, '', out); add(out); } else add(Array.from(dt.files).map((f) => ({ file: f, rel: '' })));
+  });
+  modalEl.onclick = (e) => {
+    if (e.target.closest('[data-x=no]')) { closeModal(); return; }
+    const z = e.target.closest('[data-z]'); if (z) { mk(z.dataset.z === 'dir').click(); return; }
+    const r = e.target.closest('[data-zr]'); if (r) { picked.splice(+r.dataset.zr, 1); draw(); }
+  };
+  $('form', modalEl).onsubmit = async (e) => {
+    e.preventDefault();
+    const name = $('#nzName').value.trim() || 'archive.zip', zname = /\.zip$/i.test(name) ? name : name + '.zip';
+    const items = picked.map((p) => ({ zipName: p.path, size: p.file.size, modified: p.file.lastModified, file: p.file }));
+    closeModal();
+    const j = startJob('Creating ' + zname);
+    if (!j) return;
+    try {
+      const blob = await buildZip(items, { canceled: () => j.canceled, onProgress: (read, total, i, nm) => updateJob((i + 1) + ' of ' + items.length + ': ' + nm, Math.min(99, total ? (read / total) * 100 : 0)) });
+      enqueue([{ file: new File([blob], zname, { type: 'application/zip' }), rel: '' }], prefix);
+      toast('Zip ready. Uploading ' + zname + '…', 'ok');
+    } catch (err) { if (!j.canceled) toast(err.message, 'err'); }
+    endJob();
+  };
+}
+
+/* --- storage: the biggest files --- */
+async function openLargest() {
+  openModal('<div class="dlg wide" role="dialog" aria-modal="true"><h2>Largest files</h2><div id="lgBody"><div class="spin" style="margin:30px auto"></div></div><div class="dlg-acts"><button class="btn" data-x="no">Close</button></div></div>');
+  modalEl.onclick = (e) => {
+    const r = e.target.closest('[data-lg]');
+    if (r) { const k = r.dataset.lg; closeModal(); location.hash = k.indexOf('.trash/') === 0 ? 'view=trash' : (k.lastIndexOf('/') > 0 ? encodeURIComponent(k.slice(0, k.lastIndexOf('/') + 1)) : ''); return; }
+    if (e.target.closest('[data-x]')) closeModal();
+  };
+  try {
+    const d = await api('/api/largest');
+    if (!$('#lgBody')) return;
+    const max = d.files.length ? d.files[0].size || 1 : 1;
+    $('#lgBody').innerHTML = d.files.length ? '<div class="lg">' + d.files.map((f) => {
+      const trash = f.key.indexOf('.trash/') === 0, orig = trash ? f.key.replace(/^\.trash\/[^/]+\//, '') : f.key, i = orig.lastIndexOf('/'), nm = orig.slice(i + 1);
+      return '<div class="lg-row" data-lg="' + esc(f.key) + '">' + tile(kindOf(nm), 18) + '<div class="lg-n"><b title="' + esc(orig) + '">' + esc(nm) + '</b><small>' + esc((i > 0 ? orig.slice(0, i) : 'Top level') + (trash ? ' (in trash)' : '')) + '</small><div class="lg-bar" style="width:' + Math.max(2, (f.size / max) * 100) + '%"></div></div><span class="lg-s">' + fmt(f.size) + '</span></div>';
+    }).join('') + '</div>' : '<div class="empty"><p>No files yet.</p></div>';
+  } catch (e) { if ($('#lgBody')) $('#lgBody').innerHTML = '<div class="empty"><p>' + esc(e.message) + '</p></div>'; }
+}
 
 /* ---------- start ---------- */
 applyView();

@@ -23,23 +23,12 @@
 <div class="layout">
   <aside class="side">
     <section class="card navcard">
-      <div class="btns">
-        <label class="btn primary block" for="file"><span id="uploadIco"></span>Add file</label>
-        <button id="btnFolder" class="btn block"><span id="folderIco"></span>New folder</button>
-        <label class="btn block" for="folderInput"><span id="folderUpIco"></span>Upload folder</label>
-        <button id="btnUrl" class="btn block"><span id="urlIco"></span>From link</button>
-      </div>
+      <button id="btnNew" class="btn primary block newbtn"><span id="newIco"></span>New</button>
       <input id="file" class="sr" type="file" multiple>
       <input id="folderInput" class="sr" type="file" webkitdirectory multiple>
-      <h3>My Drive</h3>
       <nav id="nav" class="nav" aria-label="Browse"></nav>
     </section>
-    <section class="card store">
-      <div class="big"><b id="uBig">…</b><span>used</span></div>
-      <div class="sub" id="uSub"></div>
-      <div class="seg" id="uSeg"></div>
-      <ul id="uTypes" class="types"></ul>
-    </section>
+    <button id="usageCard" class="usage" type="button"><span class="u-ico" id="uIco"></span><span class="u-txt"><small>Storage used</small><b id="uBig">…</b><em id="uSub"></em></span><span class="u-go" id="uGo"></span></button>
   </aside>
 
   <main>
@@ -67,7 +56,7 @@
   </main>
 </div>
 
-<label class="fab" for="file" aria-label="Add file"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></label>
+<button class="fab" id="fab" aria-label="New"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
 
 <div id="drop" class="drop"><div>Drop to upload<small>Files and folders go into the folder you are viewing</small></div></div>
 

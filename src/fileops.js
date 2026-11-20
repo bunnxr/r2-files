@@ -1,6 +1,6 @@
 // Move, copy, trash, restore, save-text and multipart helpers. R2 has no rename or move,
 // so every move is "copy, then delete" using the S3 API.
-import { HttpError, validKey, validPrefix } from "./util.js";
+import { HttpError, validKey, validPrefix, sanitizeName } from "./util.js";
 import { r2, xmlEsc, xmlTag, r2Error, parseList, uniqueKey } from "./r2.js";
 import { encPath } from "./sigv4.js";
 
@@ -160,4 +160,19 @@ export async function listParts(c, b) {
     marker = Number(xmlTag(res.text, "NextPartNumberMarker")) || parts[parts.length - 1].n;
   }
   return { parts };
+}
+
+// "New text file": creates a file that does not exist yet (never overwrites)
+export async function newText(c, b) {
+  const prefix = typeof b.prefix === "string" ? b.prefix : "";
+  if (!validPrefix(prefix) || prefix.startsWith(".trash/") || prefix.startsWith(".links/")) throw new HttpError(400, "Invalid folder.");
+  let name = sanitizeName(b.name);
+  if (!name.includes(".")) name += ".txt";
+  const body = new TextEncoder().encode(typeof b.text === "string" ? b.text : "");
+  if (body.length > 2 * 1024 ** 2) throw new HttpError(413, "Text files over 2 MB cannot be created here.");
+  const key = await uniqueKey(c, prefix, name);
+  const ext = name.split(".").pop().toLowerCase();
+  const res = await r2(c, "PUT", key, { headers: { "content-type": (TEXT_TYPES[ext] || "text/plain") + "; charset=utf-8" }, body });
+  if (!res.ok) throw new HttpError(502, r2Error(res));
+  return { ok: true, key };
 }
