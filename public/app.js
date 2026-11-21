@@ -890,32 +890,61 @@ async function moveFiles(list, mode) {
 }
 
 /* --- share links --- */
+// Files a browser can open by itself (same list as VIEW_MIME in src/util.js)
+const VIEW_EXT = ' pdf jpg jpeg png gif webp avif svg bmp ico mp4 m4v webm mov ogv mp3 m4a aac wav ogg opus flac txt md log csv srt vtt json xml html htm ';
+const canView = (n) => { const i = n.lastIndexOf('.'); return i > 0 && VIEW_EXT.indexOf(' ' + n.slice(i + 1).toLowerCase() + ' ') >= 0; };
+const MODE_TXT = { view: 'Opens in the browser', download: 'Downloads the file', both: 'Two links: one opens in the browser, one downloads' };
 async function openShare(it) {
-  const pub = isPublicKey(it.key), host = !!BOOT.publicHost;
+  const pub = isPublicKey(it.key), host = !!BOOT.publicHost, typed = host && canView(it.name);
+  let mode = typed ? 'view' : '';
+  const typeSeg = typed ? '<span class="lbl2">Link type</span><div class="seg3 sh-type"><button class="btn" data-m="view">' + ico('eye', 16) + 'View</button><button class="btn" data-m="download">' + ico('download', 16) + 'Download</button><button class="btn" data-m="both">' + ico('copy', 16) + 'Both</button></div><small class="hint" id="shModeTxt"></small>' : '';
   openModal('<div class="dlg" role="dialog" aria-modal="true"><h2>Share “' + esc(it.name) + '”</h2>' +
     (pub ? '<span class="lbl2">Public folder link</span><button class="btn primary block" data-s="public">' + ico('globe', 17) + ' Copy public link</button>' : '') +
+    typeSeg +
     '<span class="lbl2">' + (host ? 'Short link' : 'Expiring link') + '</span><div class="seg4"><button class="btn" data-s="3600">1 hour</button><button class="btn" data-s="86400">1 day</button><button class="btn" data-s="604800">7 days</button>' + (host ? '<button class="btn" data-s="0">Never expires</button>' : '') + '</div>' +
-    '<div class="copyrow" id="shRow" hidden><input id="shLink" class="field" readonly><button class="btn" data-c="1">Copy</button></div>' +
+    '<div id="shRow" hidden><small class="sh-lbl" id="shLbl1"></small><div class="copyrow"><input id="shLink" class="field" readonly><button class="btn" data-c="shLink">Copy</button></div></div>' +
+    '<div id="shRow2" hidden><small class="sh-lbl">' + ico('download', 14) + 'Download link</small><div class="copyrow"><input id="shLink2" class="field" readonly><button class="btn" data-c="shLink2">Copy</button></div></div>' +
     '<small class="hint" id="shNote">' + (host ? 'The address stays the same whatever you pick; only how long it works changes.' : 'Pick how long the link should work. It is copied for you.') + '</small>' +
     (host ? '<div class="sh-more"><button type="button" class="link" data-new="1">' + ico('plus', 15) + ' New separate link…</button><button type="button" class="link" data-all="1">' + ico('link', 15) + ' All links of this file</button></div>' : '') +
     '<div class="dlg-acts"><button class="btn danger" id="shRemove" data-rm="1" hidden>Remove link</button><button class="btn" data-x="no">Close</button></div></div>');
   const note = (t) => { const n = $('#shNote'); if (n) n.textContent = t; };
   const when = (exp) => (exp ? 'Works until ' + new Date(exp * 1000).toLocaleString() + '.' : 'Never expires.');
-  const show = async (url, text, copy) => { if (!$('#shRow')) return; $('#shRow').hidden = false; const f = $('#shLink'); f.value = url; f.select(); const ok = copy ? await copyText(url) : false; note((ok ? 'Copied. ' : '') + text); };
-  if (host) api('/api/link-info', { key: it.key }).then((i) => { if (i.exists && $('#shRow')) { show(i.url, i.active ? 'Current link. ' + when(i.exp) : 'This link has expired. Pick a length to turn it on again.', false); if (i.active) $('#shRemove').hidden = false; } }).catch(() => {});
+  const paintMode = () => {
+    modalEl.querySelectorAll('[data-m]').forEach((b) => b.classList.toggle('on', b.dataset.m === mode));
+    if ($('#shModeTxt')) $('#shModeTxt').textContent = MODE_TXT[mode] || '';
+  };
+  const lbl1 = (m) => (m === 'download' ? ico('download', 14) + 'Download link' : m === 'view' ? ico('eye', 14) + 'View link' : 'Link');
+  const show = async (r, text, copy) => {
+    if (!$('#shRow')) return;
+    $('#shRow').hidden = false; $('#shLbl1').innerHTML = typed ? lbl1(r.mode) : 'Link';
+    const f = $('#shLink'); f.value = r.url; f.select();
+    $('#shRow2').hidden = !r.dl; if (r.dl) $('#shLink2').value = r.dl.url;
+    const ok = copy ? await copyText(r.url) : false;
+    note((ok ? (r.dl ? 'View link copied. ' : 'Copied. ') : '') + text);
+  };
+  paintMode();
+  if (host) api('/api/link-info', { key: it.key }).then((i) => {
+    if (!i.exists || !$('#shRow')) return;
+    if (typed && (i.mode === 'view' || i.mode === 'download')) { mode = i.dl && i.dl.active && i.mode === 'view' ? 'both' : i.mode; paintMode(); }
+    show(i, i.active ? 'Current link. ' + when(i.exp) : 'This link has expired. Pick a length to turn it on again.', false);
+    if (i.active) $('#shRemove').hidden = false;
+  }).catch(() => {});
   modalEl.onclick = async (e) => {
     if (e.target.closest('[data-x]')) { closeModal(); return; }
     if (e.target.closest('[data-new]')) { newLinkDlg(it.key); return; }
     if (e.target.closest('[data-all]')) { closeModal(); manageLinksFor(it.key); return; }
-    if (e.target.closest('[data-c]')) { const ok = await copyText($('#shLink').value); toast(ok ? 'Copied' : 'Press and hold the link to copy it', ok ? 'ok' : 'info'); return; }
-    if (e.target.closest('[data-rm]')) { try { await api('/api/link-remove', { key: it.key }); $('#shRow').hidden = true; $('#shRemove').hidden = true; note('Link removed. It no longer works.'); } catch (err) { toast(err.message, 'err'); } return; }
+    const m = e.target.closest('[data-m]');
+    if (m) { mode = m.dataset.m; paintMode(); note('Now pick how long it should work to apply this.'); return; }
+    const cb = e.target.closest('[data-c]');
+    if (cb) { const ok = await copyText($('#' + cb.dataset.c).value); toast(ok ? 'Copied' : 'Press and hold the link to copy it', ok ? 'ok' : 'info'); return; }
+    if (e.target.closest('[data-rm]')) { try { await api('/api/link-remove', { key: it.key }); $('#shRow').hidden = true; $('#shRow2').hidden = true; $('#shRemove').hidden = true; note('Link removed. It no longer works.'); } catch (err) { toast(err.message, 'err'); } return; }
     const b = e.target.closest('[data-s]');
     if (!b) return;
     try {
-      if (b.dataset.s === 'public') return show(publicUrl(it.key), 'Anyone can open it. It never expires.', true);
-      const r = await api(host ? '/api/link' : '/api/share', { key: it.key, seconds: +b.dataset.s });
+      if (b.dataset.s === 'public') return show({ url: publicUrl(it.key) }, 'Anyone can open it. It never expires.', true);
+      const r = await api(host ? '/api/link' : '/api/share', { key: it.key, seconds: +b.dataset.s, mode });
       if (host && $('#shRemove')) $('#shRemove').hidden = false;
-      show(r.url, when(r.exp), true);
+      show(r, when(r.exp || r.expires), true);
     } catch (err) { toast(err.message, 'err'); }
   };
 }
@@ -963,6 +992,7 @@ function linkRowHtml(l, i) {
   const exact = l.exp ? fwhen(l.exp) : 'No end date';
   return '<div class="lk-row ' + st + '" data-l="' + i + '">' + tile(kindOf(nm), 18) +
     '<div class="lk-main"><div class="lk-top"><a class="lk-url" href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer" title="Open ' + esc(l.url) + '">' + esc(l.url.replace(/^https?:\/\//, '')) + '</a>' +
+    (l.mode === 'view' ? '<span class="mtag">' + ico('eye', 12) + 'View</span>' : l.mode === 'download' ? '<span class="mtag">' + ico('download', 12) + 'Download</span>' : '') +
     '<button class="ib" data-la="copy" title="Copy link" aria-label="Copy link">' + ico('copy', 16) + '</button></div>' +
     '<small class="lk-file">' + (l.key ? '<a data-la="goto" title="Show in folder">' + esc(l.key) + '</a>' : 'No file') + (l.size ? ' · ' + fmt(l.size) : '') + '</small></div>' +
     '<div class="lk-val"><span class="pill ' + st + '">' + pill + '</span><small title="' + esc(exact) + '">' + esc(lkValidity(l)) + '</small><small class="lk-exact">' + esc(exact) + '</small></div>' +
@@ -1028,21 +1058,24 @@ function newLinkDlg(key) {
   const opts = [[3600, '1 hour'], [86400, '1 day'], [604800, '7 days'], [2592000, '30 days'], [7776000, '90 days'], [0, 'Never']];
   openModal('<form class="dlg" role="dialog" aria-modal="true"><h2>New link for “' + esc(fname) + '”</h2><p>A separate link with its own address and validity. The file’s other links are not changed.</p>' +
     '<span class="lbl2">Address</span><div class="lk-addr"><span>' + esc(BOOT.publicHost) + '/</span><input id="nlName" class="field" maxlength="180" placeholder="Leave empty to use the file name" autocomplete="off"></div>' +
+    (canView(fname) ? '<span class="lbl2">Link type</span><div class="seg3 sh-type sh-type2"><button type="button" class="btn on" data-m="view">' + ico('eye', 16) + 'View</button><button type="button" class="btn" data-m="download">' + ico('download', 16) + 'Download</button></div>' : '') +
     '<span class="lbl2">Works for</span><div class="seg3">' + opts.map((o) => '<button type="button" class="btn" data-v="' + o[0] + '">' + o[1] + '</button>').join('') + '</div>' +
     '<div class="copyrow" id="nlRow" hidden><input id="nlLink" class="field" readonly><button type="button" class="btn" data-c="1">Copy</button></div>' +
     '<small class="hint" id="nlNote">Pick how long it should work to create it. It is copied for you.</small>' +
     '<div class="dlg-acts"><button type="button" class="btn" data-x="no">Close</button></div></form>');
   $('#nlName').focus();
   $('form', modalEl).onsubmit = (e) => e.preventDefault();
-  let busy = false;
+  let busy = false, mode = canView(fname) ? 'view' : '';
   modalEl.onclick = async (e) => {
     if (e.target.closest('[data-x]')) { closeModal(); return; }
+    const m = e.target.closest('[data-m]');
+    if (m) { mode = m.dataset.m; modalEl.querySelectorAll('[data-m]').forEach((x) => x.classList.toggle('on', x === m)); return; }
     if (e.target.closest('[data-c]')) { const ok = await copyText($('#nlLink').value); toast(ok ? 'Copied' : 'Press and hold the link to copy it', ok ? 'ok' : 'info'); return; }
     const b = e.target.closest('[data-v]'); if (!b || busy) return;
     busy = true;
     try {
       const s = +b.dataset.v;
-      const r = await api('/api/link-add', { key, name: $('#nlName').value.trim(), exp: s ? nowS() + s : 0 });
+      const r = await api('/api/link-add', { key, name: $('#nlName').value.trim(), exp: s ? nowS() + s : 0, mode });
       if (L.list.length) { L.list.push(r); L.activeCount++; render(); }
       if (!$('#nlRow')) return;
       $('#nlRow').hidden = false; $('#nlLink').value = r.url; $('#nlName').value = '';
@@ -1107,6 +1140,10 @@ function showLinkFile(l) { if (!l.key) return; const i = l.key.lastIndexOf('/');
 async function linkMenu(l, x, y) {
   const st = lkState(l);
   const rows = [['copy', 'copy', 'Copy link'], ['open', 'ext', 'Open link'], '-', ['valid', 'clock', 'Change validity…'], ['rename', 'edit', 'Change link address…'], ['target', 'move', 'Point to another file…']];
+  if (l.key && canView(l.key)) {
+    if (l.mode !== 'view') rows.push(['mview', 'eye', 'Make it open in the browser']);
+    if (l.mode !== 'download') rows.push(['mdl', 'download', 'Make it download']);
+  }
   if (st !== 'broken') rows.push(['newfor', 'plus', 'New link for this file…'], ['goto', 'folder', 'Show file in folder']);
   if (l.key) rows.push(['same', 'search', 'All links of this file']);
   if (st === 'active') rows.push('-', ['off', 'x', 'Turn off now']);
@@ -1122,6 +1159,8 @@ function linkAct(a, l, el) {
   else if (a === 'target') retargetLink(l);
   else if (a === 'goto') showLinkFile(l);
   else if (a === 'newfor') newLinkDlg(l.key);
+  else if (a === 'mview') lkUpdate(l, { mode: 'view' }, 'The link now opens in the browser.');
+  else if (a === 'mdl') lkUpdate(l, { mode: 'download' }, 'The link now downloads the file.');
   else if (a === 'same') { S.q = l.key; $('#q').value = l.key; render(); }
   else if (a === 'off') lkUpdate(l, { exp: nowS() }, 'Link turned off.');
   else if (a === 'del') deleteLinks([l], true);

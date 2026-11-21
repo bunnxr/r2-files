@@ -159,7 +159,7 @@ async function handle(request, env, ctx) {
       const seconds = Math.floor(Number(b.seconds));
       if (!validKey(b.key, "file") || b.key.startsWith(".trash/") || isInternal(b.key)) throw new HttpError(400, "Invalid file.");
       if (!(seconds === 0 || (seconds >= 60 && seconds <= 604800))) throw new HttpError(400, "Choose a link length of up to 7 days, or never.");
-      return json(await createLink(c, b.key, seconds));
+      return json(await createLink(c, b.key, seconds, typeof b.mode === "string" ? b.mode : ""));
     }
     case "POST /api/link-info": {
       const b = await readJson(request);

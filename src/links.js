@@ -1,9 +1,11 @@
 // Short links: https://PUBLIC_HOST/<file name>  (for example r2.bunnxr.com/charlie.zip)
 // The URL never changes whatever expiry you pick, so the expiry lives on the server.
 // Records are tiny JSON objects kept in the bucket itself (hidden folder .links/), so nothing extra to set up:
-//   .links/n/<name>   name  -> { key, exp }      (used when the link is opened)
-//   .links/k/<hash>   file  -> { name, key, exp } (used to show the current link of a file)
+//   .links/n/<name>   name  -> { key, exp, mode? }   (used when the link is opened)
+//   .links/k/<hash>   file  -> { name, key, exp, dl? } (the file's main link for the Share dialog;
+//                                                     dl = its separate download link, if any)
 // exp is a unix time in seconds, or 0 for a link that never expires.
+// mode: "view" = open in the browser, "download" = always download, none = browser decides.
 import { HttpError, validKey, sanitizeName, isInternal } from "./util.js";
 import { r2, r2Error, parseList } from "./r2.js";
 
@@ -38,16 +40,21 @@ export async function linkInfo(c, key) {
   if (!k || !k.name) return { exists: false };
   const n = await lookupLink(c, k.name);
   if (!n || n.key !== key) return { exists: false };
-  return { exists: true, active: alive(n), name: k.name, url: urlFor(c, k.name), exp: n.exp || 0 };
+  const out = { exists: true, active: alive(n), name: k.name, url: urlFor(c, k.name), exp: n.exp || 0, mode: n.mode || "auto", dl: null };
+  if (k.dl && k.dl !== k.name) {
+    const d = await lookupLink(c, k.dl);
+    if (d && d.key === key) out.dl = { name: k.dl, url: urlFor(c, k.dl), exp: d.exp || 0, active: alive(d) };
+  }
+  return out;
 }
 
 // First unused address based on the file name: charlie.zip, then charlie-2.zip, charlie-3.zip …
 // Existing links (even expired ones) are never taken over: each one is a separate link now.
-async function freeName(c, key) {
-  const base = sanitizeName(key.split("/").pop()).replace(/\s+/g, "-");
-  const dot = base.lastIndexOf("."), stem = dot > 0 ? base.slice(0, dot) : base, ext = dot > 0 ? base.slice(dot) : "";
-  for (let i = 1; i <= 30; i++) { // 30 keeps us under the Free plan's 50-subrequest cap
-    const cand = i === 1 ? base : stem + "-" + i + ext;
+async function freeName(c, key, suffix) {
+  const file = sanitizeName(key.split("/").pop()).replace(/\s+/g, "-");
+  const dot = file.lastIndexOf("."), stem = (dot > 0 ? file.slice(0, dot) : file) + (suffix || ""), ext = dot > 0 ? file.slice(dot) : "";
+  for (let i = 1; i <= 25; i++) { // 25 keeps us under the Free plan's 50-subrequest cap
+    const cand = i === 1 ? stem + ext : stem + "-" + i + ext;
     if (!(await read(c, nameObj(cand)))) return cand;
   }
   throw new HttpError(409, "Too many links use this file name. Pick a custom address instead.");
@@ -55,7 +62,9 @@ async function freeName(c, key) {
 
 // The main link is the one the Share dialog shows and re-uses. Creating a link never touches the
 // others, so a file can have any number of links, each with its own address and validity.
-export async function createLink(c, key, seconds) {
+// mode: "view" (open in the browser), "download", "both" (a view link plus a separate
+// download link, e.g. charlie-download.pdf), or anything else = browser decides (old behaviour).
+export async function createLink(c, key, seconds, mode) {
   if (!c.PUBLIC_HOST) throw new HttpError(400, "Set PUBLIC_HOST in the config to create short links.");
   const exp = seconds > 0 ? Math.floor(Date.now() / 1000) + seconds : 0;
   const ko = await keyObj(key);
@@ -66,18 +75,45 @@ export async function createLink(c, key, seconds) {
     if (!n || n.key === key) name = prev.name;
   }
   if (!name) name = await freeName(c, key);
-  const rec = { key, exp, t: Math.floor(Date.now() / 1000) };
+  const now = Math.floor(Date.now() / 1000);
+  const rec = withMode({ key, exp, t: now }, mode === "both" ? "view" : mode);
   await write(c, nameObj(name), rec);
-  await write(c, ko, Object.assign({ name }, rec));
-  return { name, url: urlFor(c, name), exp };
+  const ptr = { name, key, exp, t: now };
+  let dl = null;
+  if (prev && prev.dl) ptr.dl = prev.dl; // remember the download companion even when not asked for now
+  if (mode === "both") {
+    let dn = null;
+    if (prev && prev.dl && prev.dl !== name) { const n = await lookupLink(c, prev.dl); if (!n || n.key === key) dn = prev.dl; }
+    if (!dn) dn = await freeName(c, key, "-download");
+    await write(c, nameObj(dn), { key, exp, t: now, mode: "download" });
+    ptr.dl = dn;
+    dl = { name: dn, url: urlFor(c, dn) };
+  }
+  await write(c, ko, ptr);
+  return { name, url: urlFor(c, name), exp, mode: rec.mode || "auto", dl };
 }
+const MODES = ["view", "download"];
+function withMode(rec, mode) { if (MODES.includes(mode)) rec.mode = mode; else delete rec.mode; return rec; }
 
+// "Remove link" in the Share dialog: the main link and its download companion
 export async function removeLink(c, key) {
   const ko = await keyObj(key);
   const k = await read(c, ko);
-  if (k && k.name) { const n = await lookupLink(c, k.name); if (n && n.key === key) await drop(c, nameObj(k.name)); }
+  for (const nm of [k && k.name, k && k.dl]) {
+    if (!nm) continue;
+    const n = await lookupLink(c, nm);
+    if (n && n.key === key) await drop(c, nameObj(nm));
+  }
   await drop(c, ko);
   return { ok: true };
+}
+// A link stops being its file's main link (renamed, re-pointed or deleted). The pointer to the
+// download companion is kept, so "Both" re-uses charlie-download.pdf instead of making -2.
+async function unsetMain(c, key, name) {
+  const ko = await keyObj(key);
+  const k = await read(c, ko);
+  if (!k || k.name !== name) return;
+  if (k.dl && k.dl !== name) await write(c, ko, { key, dl: k.dl }); else await drop(c, ko);
 }
 
 // ---------------------------------------------------------------------
@@ -106,7 +142,7 @@ export async function listLinks(c, after) {
     const h = await r2(c, "HEAD", rec.key).catch(() => null);
     const missing = !h || h.status === 404;
     const size = h && h.ok ? Number(h.headers.get("content-length")) || 0 : 0;
-    return { name, url: urlFor(c, name), key: rec.key, exp: rec.exp || 0, t: rec.t || 0, active: alive(rec), missing, size };
+    return { name, url: urlFor(c, name), key: rec.key, exp: rec.exp || 0, t: rec.t || 0, active: alive(rec), missing, size, mode: rec.mode || "auto" };
   }));
   return { links, next: p.truncated && keys.length ? keys[keys.length - 1].slice(nameObj("").length) : "" };
 }
@@ -118,7 +154,7 @@ export async function updateLink(c, b) {
   const rec = await read(c, nameObj(name));
   if (!rec || typeof rec.key !== "string") throw new HttpError(404, "This link no longer exists.");
   const now = Math.floor(Date.now() / 1000);
-  const out = { key: rec.key, exp: rec.exp || 0, t: rec.t || now };
+  const out = withMode({ key: rec.key, exp: rec.exp || 0, t: rec.t || now }, b.mode !== undefined ? b.mode : rec.mode);
 
   if (b.exp !== undefined) {
     const exp = Math.floor(Number(b.exp));
@@ -144,12 +180,8 @@ export async function updateLink(c, b) {
   if (newName !== name) await drop(c, nameObj(name));
   // A renamed or re-pointed link stops being its file's main link, so the next "Share link"
   // makes a fresh link for that file instead of changing this one.
-  if (newName !== name || out.key !== rec.key) {
-    const ko = await keyObj(rec.key);
-    const k = await read(c, ko);
-    if (k && k.name === name) await drop(c, ko);
-  }
-  return { name: newName, url: urlFor(c, newName), key: out.key, exp: out.exp, t: out.t, active: alive(out) };
+  if (newName !== name || out.key !== rec.key) await unsetMain(c, rec.key, name);
+  return { name: newName, url: urlFor(c, newName), key: out.key, exp: out.exp, t: out.t, active: alive(out), mode: out.mode || "auto" };
 }
 
 // An extra, separate link for a file. name "" = pick one from the file name.
@@ -166,20 +198,16 @@ export async function addLink(c, b) {
   if (String(b.name ?? "").trim()) {
     name = cleanName(b.name);
     if (await read(c, nameObj(name))) throw new HttpError(409, "Another link already uses “" + name + "”. Delete it first or pick another address.");
-  } else name = await freeName(c, key);
-  const rec = { key, exp, t: now };
+  } else name = await freeName(c, key, b.mode === "download" ? "-download" : "");
+  const rec = withMode({ key, exp, t: now }, b.mode);
   await write(c, nameObj(name), rec);
-  return { name, url: urlFor(c, name), key, exp, t: now, active: true, missing: false, size: Number(h.headers.get("content-length")) || 0 };
+  return { name, url: urlFor(c, name), key, exp, t: now, active: true, missing: false, size: Number(h.headers.get("content-length")) || 0, mode: rec.mode || "auto" };
 }
 
 export async function deleteLink(c, name) {
   if (!validKey(nameObj(String(name ?? "")), "file")) throw new HttpError(400, "Invalid link.");
   const rec = await read(c, nameObj(name));
   await drop(c, nameObj(name));
-  if (rec && typeof rec.key === "string") {
-    const ko = await keyObj(rec.key);
-    const k = await read(c, ko);
-    if (k && k.name === name) await drop(c, ko);
-  }
+  if (rec && typeof rec.key === "string") await unsetMain(c, rec.key, name);
   return { ok: true };
 }

@@ -3,7 +3,7 @@
 //   https://HOST/<folder>/<file>                 files inside a PUBLIC_FOLDERS folder
 //   https://HOST/<folder>/<file>?e=<unix>&s=<sig>  older signed links (still honoured)
 // The Worker checks the rules, then streams the file from R2 (range requests work, so video seeks).
-import { validKey, isInternal } from "./util.js";
+import { validKey, isInternal, viewMime } from "./util.js";
 import { presign, encPath } from "./sigv4.js";
 import { contentDisposition } from "./uploads.js";
 import { lookupLink } from "./links.js";
@@ -41,9 +41,12 @@ export async function shareUrl(c, key, seconds) {
 const plain = (text, status) => new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 
 // Streams one object from R2 to the client. Used for public files and for the same-origin /api/read.
-async function streamObject(c, request, key, { dl, cache, cors }) {
+// view: show in the browser (inline, with a content type the browser understands)
+async function streamObject(c, request, key, { dl, view, cache, cors }) {
   const query = {};
+  const vmime = view && !dl ? viewMime(key.split("/").pop()) : "";
   if (dl) query["response-content-disposition"] = contentDisposition("attachment", key);
+  else if (vmime) query["response-content-disposition"] = contentDisposition("inline", key);
   const upstream = await presign(c, request.method === "HEAD" ? "HEAD" : "GET", key, { query, expires: 300 });
   const h = {};
   for (const n of ["range", "if-none-match", "if-modified-since", "if-match", "if-range"]) { const v = request.headers.get(n); if (v) h[n] = v; }
@@ -53,6 +56,7 @@ async function streamObject(c, request, key, { dl, cache, cors }) {
   if (res.status >= 400 && res.status !== 412 && res.status !== 416) return plain("Storage error.", 502);
   const out = new Headers();
   for (const n of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified", "content-disposition"]) { const v = res.headers.get(n); if (v) out.set(n, v); }
+  if (vmime) out.set("content-type", vmime);
   out.set("cache-control", cache);
   out.set("x-content-type-options", "nosniff");
   out.set("referrer-policy", "no-referrer");
@@ -76,7 +80,8 @@ export async function servePublic(request, c, url) {
     const rec = await lookupLink(c, path);
     if (!rec) return plain("Not found", 404);
     if (rec.exp && rec.exp * 1000 < Date.now()) return plain("This link has expired.", 410);
-    return streamObject(c, request, rec.key, { dl, cors: true, cache: rec.exp ? "private, max-age=0, must-revalidate" : "public, max-age=300" });
+    // mode "download" always downloads; "view" opens in the browser (?dl=1 still downloads); no mode = browser decides
+    return streamObject(c, request, rec.key, { dl: dl || rec.mode === "download", view: rec.mode === "view", cors: true, cache: rec.exp ? "private, max-age=0, must-revalidate" : "public, max-age=300" });
   }
 
   const key = path;

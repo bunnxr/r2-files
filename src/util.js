@@ -96,4 +96,16 @@ function typeOf(key) {
   return "other";
 }
 
-export { TYPES, typeOf, HttpError, escHtml, safeColor, json, readJson, fmtBytes, validKey, validPrefix, sanitizeName, INTERNAL, isInternal, logEvent };
+// Files a browser can show by itself. A "view" link serves these inline with this content type,
+// so they open in the tab instead of downloading (even if they were uploaded as octet-stream).
+const VIEW_MIME = {
+  pdf: "application/pdf",
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp", avif: "image/avif", svg: "image/svg+xml", bmp: "image/bmp", ico: "image/x-icon",
+  mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mov: "video/quicktime", ogv: "video/ogg",
+  mp3: "audio/mpeg", m4a: "audio/mp4", aac: "audio/aac", wav: "audio/wav", ogg: "audio/ogg", opus: "audio/ogg", flac: "audio/flac",
+  txt: "text/plain; charset=utf-8", md: "text/plain; charset=utf-8", log: "text/plain; charset=utf-8", csv: "text/plain; charset=utf-8", srt: "text/plain; charset=utf-8", vtt: "text/vtt; charset=utf-8",
+  json: "application/json; charset=utf-8", xml: "text/plain; charset=utf-8", html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8",
+};
+const viewMime = (name) => { const i = String(name).lastIndexOf("."); return i > 0 ? VIEW_MIME[name.slice(i + 1).toLowerCase()] || "" : ""; };
+
+export { TYPES, typeOf, HttpError, escHtml, safeColor, json, readJson, fmtBytes, validKey, validPrefix, sanitizeName, INTERNAL, isInternal, logEvent, viewMime };
