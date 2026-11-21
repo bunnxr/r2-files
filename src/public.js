@@ -92,12 +92,12 @@ function viewerPage(key, cache) {
     '<meta name="robots" content="noindex"><meta name="theme-color" content="#121514"><style>' +
     'html,body{height:100%;margin:0}body{display:flex;flex-direction:column;background:#121514;color:#e9ecea;font:500 14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}' +
     'header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#0c0e0d;border-bottom:1px solid #1f2422}' +
-    'header svg{flex:none}header span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    'header svg{flex:none}header .t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25}header span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}header small{font-size:10px;font-weight:500;color:#7d8682;letter-spacing:.02em}' +
     'header a{flex:none;color:#7fd8c9;text-decoration:none;font-weight:600;padding:6px 12px;border:1.5px solid #2a6f66;border-radius:999px}header a:hover{background:#163b36}' +
     'main{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}' +
     'video,img{max-width:100%;max-height:100%;display:block}iframe{width:100%;height:100%;border:0;background:#fff}' +
     '.aud{display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px;text-align:center}.aud audio{width:min(420px,90vw)}' +
-    '</style></head><body><header><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">' + ORB + '</svg><span title="' + n + '">' + n + '</span><a href="?dl=1">Download</a></header><main>' + body + '</main></body></html>';
+    '</style></head><body><header><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">' + ORB + '</svg><div class="t"><span title="' + n + '">' + n + '</span><small>@bunnxr</small></div><a href="?dl=1">Download</a></header><main>' + body + '</main></body></html>';
   return new Response(html, { headers: {
     "content-type": "text/html; charset=utf-8", "cache-control": cache, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
     "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
