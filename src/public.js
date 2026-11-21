@@ -69,6 +69,42 @@ async function streamObject(c, request, key, { dl, view, cache, cors }) {
 // Same-origin read for the app itself (zip browsing, text viewer, zipping). No CORS on the bucket is needed for this.
 export const proxyRead = (c, request, key) => streamObject(c, request, key, { dl: false, cache: "no-store", cors: false });
 
+// ---------------------------------------------------------------------
+//  Viewer page for short links opened in a tab: the site's logo as the tab icon, the file name as the
+//  title, a slim bar with a download button, and the file shown full size (video / audio player,
+//  image, PDF or text). No scripts. The orb logo matches public/favicon.ico and the app header.
+// ---------------------------------------------------------------------
+const ORB = "<circle cx='11' cy='13' r='8.5' fill='#0f766e'/><circle cx='9.4' cy='11.2' r='6.4' fill='#1f9686'/><circle cx='8.2' cy='9.8' r='3.6' fill='#45b8a7'/><circle cx='19.6' cy='4.6' r='2.1' fill='#2fa594'/>";
+const ORB_ICON = "data:image/svg+xml," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>" + ORB + "</svg>");
+const escHtml = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+
+function viewerPage(key, cache) {
+  const name = key.split("/").pop(), mime = viewMime(name);
+  if (!mime || /^text\/html/.test(mime)) return null; // HTML files show themselves (sandboxed)
+  const n = escHtml(name);
+  let body;
+  if (mime.startsWith("video/")) body = '<video src="?raw=1" controls autoplay playsinline preload="metadata"></video>';
+  else if (mime.startsWith("audio/")) body = '<div class="aud"><svg viewBox="0 0 24 24" width="96" height="96">' + ORB + '</svg><b>' + n + '</b><audio src="?raw=1" controls autoplay preload="metadata"></audio></div>';
+  else if (mime.startsWith("image/")) body = '<img src="?raw=1" alt="' + n + '">';
+  else body = '<iframe src="?raw=1" title="' + n + '"></iframe>'; // PDF, text, JSON …
+  const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>' + n + '</title><link rel="icon" type="image/svg+xml" href="' + ORB_ICON + '"><link rel="alternate icon" href="/favicon.ico">' +
+    '<meta name="robots" content="noindex"><meta name="theme-color" content="#121514"><style>' +
+    'html,body{height:100%;margin:0}body{display:flex;flex-direction:column;background:#121514;color:#e9ecea;font:500 14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}' +
+    'header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#0c0e0d;border-bottom:1px solid #1f2422}' +
+    'header svg{flex:none}header span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    'header a{flex:none;color:#7fd8c9;text-decoration:none;font-weight:600;padding:6px 12px;border:1.5px solid #2a6f66;border-radius:999px}header a:hover{background:#163b36}' +
+    'main{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}' +
+    'video,img{max-width:100%;max-height:100%;display:block}iframe{width:100%;height:100%;border:0;background:#fff}' +
+    '.aud{display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px;text-align:center}.aud audio{width:min(420px,90vw)}' +
+    '</style></head><body><header><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">' + ORB + '</svg><span title="' + n + '">' + n + '</span><a href="?dl=1">Download</a></header><main>' + body + '</main></body></html>';
+  return new Response(html, { headers: {
+    "content-type": "text/html; charset=utf-8", "cache-control": cache, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "vary": "Sec-Fetch-Dest",
+  } });
+}
+
 // shortOnly: on LINK_HOST (bunnxr.com, reached through the shortener) only short links are served
 export async function servePublic(request, c, url, { shortOnly } = {}) {
   if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
@@ -81,8 +117,19 @@ export async function servePublic(request, c, url, { shortOnly } = {}) {
     const rec = await lookupLink(c, path);
     if (!rec) return plain("This link does not exist or has expired.", 404);
     if (rec.exp && rec.exp * 1000 < Date.now()) { await dropExpired(c, path); return plain("This link has expired.", 410); }
+    const cache = rec.exp ? "private, max-age=0, must-revalidate" : "public, max-age=300";
+    const raw = url.searchParams.has("raw");
+    // Someone opened a viewable link in a browser tab: wrap the file in a small page of our own, so the tab
+    // carries the site's logo and the file name. The page loads the file itself from ?raw=1. Everything else
+    // (video players, <img> embeds, iframes, curl, link-preview bots, ?dl=1) still gets the bare file.
+    if (!dl && !raw && rec.mode !== "download" && request.method === "GET" && request.headers.get("sec-fetch-dest") === "document") {
+      const page = viewerPage(rec.key, cache);
+      if (page) return page;
+    }
     // mode "download" always downloads; "view" opens in the browser (?dl=1 still downloads); no mode = browser decides
-    return streamObject(c, request, rec.key, { dl: dl || rec.mode === "download", view: rec.mode === "view", cors: true, cache: rec.exp ? "private, max-age=0, must-revalidate" : "public, max-age=300" });
+    const res = await streamObject(c, request, rec.key, { dl: dl || rec.mode === "download", view: rec.mode === "view" || raw, cors: true, cache });
+    res.headers.set("vary", "Sec-Fetch-Dest"); // same URL serves the viewer page to tabs, so caches must keep them apart
+    return res;
   }
 
   if (shortOnly) return plain("Not found", 404);
