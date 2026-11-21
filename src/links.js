@@ -14,7 +14,9 @@ const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, 
 const nameObj = (n) => ".links/n/" + n;
 const keyObj = async (k) => ".links/k/" + hex(await crypto.subtle.digest("SHA-256", enc.encode(k))).slice(0, 32);
 const alive = (r) => !!r && (!r.exp || r.exp * 1000 > Date.now());
-const urlFor = (c, name) => "https://" + c.PUBLIC_HOST + "/" + encodeURIComponent(name);
+// Every link works on both LINK_HOST (bunnxr.com, via the shortener) and PUBLIC_HOST (r2.bunnxr.com);
+// the address shown and copied uses LINK_HOST.
+const urlFor = (c, name) => "https://" + (c.LINK_HOST || c.PUBLIC_HOST) + "/" + encodeURIComponent(name);
 
 async function read(c, obj) {
   const res = await r2(c, "GET", obj);
@@ -48,6 +50,14 @@ export async function linkInfo(c, key) {
   return out;
 }
 
+// Does the shortener Worker already use this back-half on bunnxr.com? It looks names up in lower
+// case and ignores names starting with "_", so the same rules apply here.
+async function inShortener(c, name) {
+  if (!c.SHORTENER_KV || !name || name.startsWith("_")) return false;
+  try { return (await c.SHORTENER_KV.get(name.toLowerCase())) !== null; } catch (e) { return false; }
+}
+const shortenerTaken = (c, name) => new HttpError(409, (c.LINK_HOST || c.PUBLIC_HOST) + "/" + name + " already exists in your link shortener. Pick another address.");
+
 // First unused address based on the file name: charlie.zip, then charlie-2.zip, charlie-3.zip …
 // Existing links (even expired ones) are never taken over: each one is a separate link now.
 async function freeName(c, key, suffix) {
@@ -55,7 +65,7 @@ async function freeName(c, key, suffix) {
   const dot = file.lastIndexOf("."), stem = (dot > 0 ? file.slice(0, dot) : file) + (suffix || ""), ext = dot > 0 ? file.slice(dot) : "";
   for (let i = 1; i <= 25; i++) { // 25 keeps us under the Free plan's 50-subrequest cap
     const cand = i === 1 ? stem + ext : stem + "-" + i + ext;
-    if (!(await read(c, nameObj(cand)))) return cand;
+    if (!(await read(c, nameObj(cand))) && !(await inShortener(c, cand))) return cand;
   }
   throw new HttpError(409, "Too many links use this file name. Pick a custom address instead.");
 }
@@ -72,7 +82,7 @@ export async function createLink(c, key, seconds, mode) {
   const prev = await read(c, ko);
   if (prev && prev.name) { // keep the same URL for this file's main link whenever it is still ours
     const n = await lookupLink(c, prev.name);
-    if (!n || n.key === key) name = prev.name;
+    if ((!n || n.key === key) && !(await inShortener(c, prev.name))) name = prev.name;
   }
   if (!name) name = await freeName(c, key);
   const now = Math.floor(Date.now() / 1000);
@@ -83,7 +93,7 @@ export async function createLink(c, key, seconds, mode) {
   if (prev && prev.dl) ptr.dl = prev.dl; // remember the download companion even when not asked for now
   if (mode === "both") {
     let dn = null;
-    if (prev && prev.dl && prev.dl !== name) { const n = await lookupLink(c, prev.dl); if (!n || n.key === key) dn = prev.dl; }
+    if (prev && prev.dl && prev.dl !== name) { const n = await lookupLink(c, prev.dl); if ((!n || n.key === key) && !(await inShortener(c, prev.dl))) dn = prev.dl; }
     if (!dn) dn = await freeName(c, key, "-download");
     await write(c, nameObj(dn), { key, exp, t: now, mode: "download" });
     ptr.dl = dn;
@@ -172,6 +182,7 @@ export async function updateLink(c, b) {
   if (b.newName !== undefined && b.newName !== name) {
     newName = cleanName(b.newName);
     if (newName !== name) {
+      if (await inShortener(c, newName)) throw shortenerTaken(c, newName);
       const other = await read(c, nameObj(newName));
       if (other && alive(other)) throw new HttpError(409, "Another link already uses “" + newName + "”.");
     }
@@ -198,6 +209,7 @@ export async function addLink(c, b) {
   let name;
   if (String(b.name ?? "").trim()) {
     name = cleanName(b.name);
+    if (await inShortener(c, name)) throw shortenerTaken(c, name);
     if (await read(c, nameObj(name))) throw new HttpError(409, "Another link already uses “" + name + "”. Delete it first or pick another address.");
   } else name = await freeName(c, key, b.mode === "download" ? "-download" : "");
   const rec = withMode({ key, exp, t: now }, b.mode);

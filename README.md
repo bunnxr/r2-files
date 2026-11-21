@@ -88,7 +88,7 @@ Find them under **Workers & Pages → r2-files → Observability → Logs**, and
 ## Secrets (never commit them)
 Set `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ACCOUNT_ID` and `ENDPOINT` as **secrets** in the dashboard (Worker > Settings > Variables and Secrets). They override `src/config.js`. Plain-text dashboard variables are removed by `wrangler deploy` unless they are in `wrangler.toml`, so use secrets, or put non-secret values in `src/config.js`.
 
-The **upload password is not a secret and not in git**: it lives in the bucket at `.system/upload-auth.json` and is managed from the settings page. Nothing in `wrangler.toml` holds an ID or a secret.
+The **upload password is not a secret and not in git**: it lives in the bucket at `.system/upload-auth.json` and is managed from the settings page. Nothing in `wrangler.toml` holds a secret; its only ID is the shortener's KV namespace (see "Short links on bunnxr.com"), which is not a secret.
 
 ## Deploy with git (no Node on your PC)
 Push this folder to GitHub/GitLab. In the Worker: Settings > Builds > Connect, pick the repo. Deploy command: `npx wrangler deploy`. The Worker name must stay `r2-files`.
@@ -114,3 +114,6 @@ Only the files in `public/` need to change; leave `src/` alone.
 - `app.js`: the functions `itemHtml`, `folderHtml`, `theadHtml` and `render` build the file rows and cards. Class names and `data-*` attributes there (`data-act`, `data-i`, `data-f`, `data-sort`, `data-u`, `data-up`) are used by the click handlers, so keep them.
 - The **Uploads** sidebar item (the upload password page) and the `#view=upload-password` route are part of the UI: the item comes from the `NAV` list and is drawn by `renderNav`, the panel is built by `renderUpAuth` into `#upBody`, and its styles are the `.upcard`, `.up-*` and `.sw` rules at the end of `style.css`. Keep them when restyling.
 - Do not add external scripts or fonts: the Content-Security-Policy in `src/pages.js` blocks them.
+
+## Short links on bunnxr.com
+Short links are shown and copied as `https://LINK_HOST/<name>` (for example `bunnxr.com/gta6.mp4`). `bunnxr.com/*` is routed to the separate **shortener** Worker. When the shortener has no link with that name, it hands the request to this Worker through a service binding (`FILES` → `r2-files` in the shortener's `wrangler.toml`), and this Worker serves the file link. On `LINK_HOST` only short links are served, never public folders. The same links also keep working on `PUBLIC_HOST` (`r2.bunnxr.com/gta6.mp4`). To keep the two from clashing, this Worker reads the shortener's KV namespace (binding `SHORTENER_KV`, read only): a custom address the shortener already uses is refused with an error, and automatic addresses (`charlie.zip`, `charlie-2.zip` …) skip such names. If the shortener later adds a back-half that a file link already has, the shortener's link wins on `bunnxr.com`.

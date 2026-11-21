@@ -30,13 +30,17 @@ async function handle(request, env, ctx) {
   if (c.UPLOAD_HOST && host === c.UPLOAD_HOST) return serveScript(request, env, url);
 
   const isPublicHost = !!c.PUBLIC_HOST && host === c.PUBLIC_HOST;
+  // LINK_HOST (bunnxr.com) is routed to the shortener Worker, never to this one; requests for it only
+  // arrive here through the shortener's service binding, for names the shortener does not have.
+  const isLinkHost = !!c.PUBLIC_HOST && !!c.LINK_HOST && c.LINK_HOST !== c.PUBLIC_HOST && host === c.LINK_HOST;
   const problems = configProblems(c);
   if (problems.length) {
-    if (isPublicHost) return new Response("Not configured yet.", { status: 503 });
+    if (isPublicHost || isLinkHost) return new Response("Not configured yet.", { status: 503 });
     return isApi ? json({ error: "Not configured yet: edit the CONFIG block." }, 503) : notConfiguredPage(problems);
   }
   // The public hostname only ever serves files (public folders and signed share links): no UI, no API, no login
   if (isPublicHost) return servePublic(request, c, url);
+  if (isLinkHost) return servePublic(request, c, url, { shortOnly: true }); // bunnxr.com: short links only, no public folders
 
   // Terminal routes: protected by the upload password instead of Access
   // (Access has a bypass policy for /cli/*), so they run before verifyAccess.
@@ -75,7 +79,7 @@ async function handle(request, env, ctx) {
       return json({ prefix, folders: r.folders.filter((f) => f !== ".trash/" && !isInternal(f)), files: r.files.filter((f) => f.key !== prefix && !isInternal(f.key)), truncated: r.truncated });
     }
     case "GET /api/config":
-      return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0d6efd"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW, publicHost: c.PUBLIC_HOST, publicFolders: c.PUBLIC_FOLDER_LIST, trashDays: c.TRASH_DAYS });
+      return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0d6efd"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW, publicHost: c.PUBLIC_HOST, linkHost: c.LINK_HOST || c.PUBLIC_HOST, publicFolders: c.PUBLIC_FOLDER_LIST, trashDays: c.TRASH_DAYS });
     case "GET /api/usage": {
       const u = await bucketUsage(c);
       return json({ used: u.used, count: u.count, partial: u.partial, byType: u.byType });

@@ -29,6 +29,9 @@ const CONFIG = {
   // ---- Public and share links
   PUBLIC_HOST: "r2.bunnxr.com",     // hostname that serves public files and expiring share links. Attach it to THIS Worker (not to the bucket). Empty = use plain R2 signed links instead
   PUBLIC_FOLDERS: "public/",        // comma-separated folders whose files anyone can open at https://PUBLIC_HOST/<path>
+  LINK_HOST: "bunnxr.com",          // hostname used in short links (bunnxr.com/gta6.mp4). It belongs to the shortener Worker, which hands
+                                    // names it does not know to this Worker through a service binding. Links also keep working on PUBLIC_HOST.
+                                    // Empty = short links use PUBLIC_HOST
   UPLOAD_HOST: "upload.bunnxr.com", // hostname that serves the terminal install scripts (no login, no secrets). Empty = off
   TRASH_DAYS: 30,                   // shown in the UI; use the same number in the R2 lifecycle rule for ".trash/"
 
@@ -62,8 +65,11 @@ function getConfig(env) {
   c.URL_EXPIRY_SECONDS = Math.min(604800, Math.max(60, Math.floor(c.URL_EXPIRY_SECONDS)));
   c.DEFAULT_VIEW = c.DEFAULT_VIEW === "list" ? "list" : "grid";
   c.PUBLIC_HOST = c.PUBLIC_HOST.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  c.LINK_HOST = c.LINK_HOST.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase() || c.PUBLIC_HOST;
   c.UPLOAD_HOST = c.UPLOAD_HOST.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
   c.PUBLIC_FOLDER_LIST = c.PUBLIC_FOLDERS.split(",").map((p) => p.trim().replace(/^\/+/, "")).filter((p) => p && !p.startsWith(".trash")).map((p) => p.replace(/\/*$/, "/"));
+  // The shortener Worker's KV namespace (read only), so file links never clash with its back-halves
+  c.SHORTENER_KV = env && env.SHORTENER_KV && typeof env.SHORTENER_KV.get === "function" ? env.SHORTENER_KV : null;
   return c;
 }
 

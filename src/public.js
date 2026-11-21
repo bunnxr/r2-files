@@ -69,7 +69,8 @@ async function streamObject(c, request, key, { dl, view, cache, cors }) {
 // Same-origin read for the app itself (zip browsing, text viewer, zipping). No CORS on the bucket is needed for this.
 export const proxyRead = (c, request, key) => streamObject(c, request, key, { dl: false, cache: "no-store", cors: false });
 
-export async function servePublic(request, c, url) {
+// shortOnly: on LINK_HOST (bunnxr.com, reached through the shortener) only short links are served
+export async function servePublic(request, c, url, { shortOnly } = {}) {
   if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
   let path;
   try { path = decodeURIComponent(url.pathname.slice(1)); } catch (e) { return plain("Not found", 404); }
@@ -84,6 +85,7 @@ export async function servePublic(request, c, url) {
     return streamObject(c, request, rec.key, { dl: dl || rec.mode === "download", view: rec.mode === "view", cors: true, cache: rec.exp ? "private, max-age=0, must-revalidate" : "public, max-age=300" });
   }
 
+  if (shortOnly) return plain("Not found", 404);
   const key = path;
   if (!validKey(key, "file") || key.startsWith(".trash/") || isInternal(key)) return plain("Not found", 404);
   const e = url.searchParams.get("e"), s = url.searchParams.get("s");

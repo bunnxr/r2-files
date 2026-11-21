@@ -34,6 +34,12 @@ custom_domain = true
 [triggers]
 crons = ["0 4 * * *", "30 * * * *"]
 
+# The shortener Worker's links (its LINKS namespace). Only read, never written: a file link
+# may not take an address the shortener already uses on bunnxr.com.
+[[kv_namespaces]]
+binding = "SHORTENER_KV"
+id = "d714e0bc1f154df5b8a8faa753193f85"
+
 # Worker logs, visible under the Worker's Observability tab
 [observability]
 enabled = true

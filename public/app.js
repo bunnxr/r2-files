@@ -1056,7 +1056,7 @@ function newLinkDlg(key) {
   const fname = key.split('/').pop();
   const opts = [[3600, '1 hour'], [86400, '1 day'], [604800, '7 days'], [2592000, '30 days'], [7776000, '90 days'], [0, 'Never']];
   openModal('<form class="dlg" role="dialog" aria-modal="true"><h2>New link for “' + esc(fname) + '”</h2><p>A separate link with its own address and validity. The file’s other links are not changed.</p>' +
-    '<span class="lbl2">Address</span><div class="lk-addr"><span>' + esc(BOOT.publicHost) + '/</span><input id="nlName" class="field" maxlength="180" placeholder="Leave empty to use the file name" autocomplete="off"></div>' +
+    '<span class="lbl2">Address</span><div class="lk-addr"><span>' + esc(BOOT.linkHost || BOOT.publicHost) + '/</span><input id="nlName" class="field" maxlength="180" placeholder="Leave empty to use the file name" autocomplete="off"></div>' +
     (canView(fname) ? '<span class="lbl2">Link type</span><div class="seg3 sh-type sh-type2"><button type="button" class="btn on" data-m="view">' + ico('eye', 16) + 'View</button><button type="button" class="btn" data-m="download">' + ico('download', 16) + 'Download</button></div>' : '') +
     '<span class="lbl2">Works for</span><div class="seg3">' + opts.map((o) => '<button type="button" class="btn" data-v="' + o[0] + '">' + o[1] + '</button>').join('') + '</div>' +
     '<div class="copyrow" id="nlRow" hidden><input id="nlLink" class="field" readonly><button type="button" class="btn" data-c="1">Copy</button></div>' +
