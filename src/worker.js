@@ -8,6 +8,7 @@ import { uploadInit, uploadComplete, deleteFolderBatch, contentDisposition } fro
 import { securityPolicy, notConfiguredPage } from "./pages.js";
 import { servePublic, shareUrl, proxyRead } from "./public.js";
 import { createLink, linkInfo, removeLink } from "./links.js";
+import { readNotes, setNote, dropNotes } from "./notes.js";
 import * as ops from "./fileops.js";
 import { fetchToR2 } from "./urlfetch.js";
 
@@ -58,7 +59,7 @@ async function handle(request, env, ctx) {
       const prefix = url.searchParams.get("prefix") ?? "";
       if (!validPrefix(prefix)) throw new HttpError(400, "Invalid folder path.");
       const r = await listAll(c, { prefix, delimiter: "/", maxPages: 20 });
-      return json({ prefix, folders: r.folders.filter((f) => f !== ".trash/" && f !== ".links/"), files: r.files.filter((f) => f.key !== prefix), truncated: r.truncated });
+      return json({ prefix, folders: r.folders.filter((f) => f !== ".trash/" && f !== ".links/" && f !== ".notes/"), files: r.files.filter((f) => f.key !== prefix), truncated: r.truncated });
     }
     case "GET /api/config":
       return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0d6efd"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW, publicHost: c.PUBLIC_HOST, publicFolders: c.PUBLIC_FOLDER_LIST, trashDays: c.TRASH_DAYS });
@@ -70,7 +71,7 @@ async function handle(request, env, ctx) {
       const type = url.searchParams.get("type") || "recent";
       if (type !== "recent" && !TYPES.includes(type)) throw new HttpError(400, "Unknown file type.");
       const u = await bucketUsage(c);
-      const all = u.files.filter((f) => !f.key.endsWith("/") && (type === "recent" ? typeOf(f.key) !== "trash" : typeOf(f.key) === type) && !f.key.startsWith(".links/"));
+      const all = u.files.filter((f) => !f.key.endsWith("/") && (type === "recent" ? typeOf(f.key) !== "trash" : typeOf(f.key) === type) && !(f.key.startsWith(".links/") || f.key.startsWith(".notes/")));
       all.sort((a, z) => (a.modified < z.modified ? 1 : a.modified > z.modified ? -1 : 0));
       const limit = type === "recent" ? 100 : 500;
       return json({ type, total: all.length, files: all.slice(0, limit), truncated: all.length > limit || u.partial });
@@ -108,6 +109,7 @@ async function handle(request, env, ctx) {
       if (!validKey(b.key, "file")) throw new HttpError(400, "Invalid file.");
       const res = await r2(c, "DELETE", b.key);
       if (!res.ok && res.status !== 404) throw new HttpError(502, r2Error(res));
+      await dropNotes(c, [b.key]);
       return json({ ok: true });
     }
     case "POST /api/delete-folder":
@@ -127,13 +129,13 @@ async function handle(request, env, ctx) {
     }
     case "GET /api/read": {
       const key = url.searchParams.get("key");
-      if (!validKey(key, "file") || key.startsWith(".links/")) throw new HttpError(400, "Invalid file.");
+      if (!validKey(key, "file") || (key.startsWith(".links/") || key.startsWith(".notes/"))) throw new HttpError(400, "Invalid file.");
       return proxyRead(c, request, key);
     }
     case "POST /api/link": {
       const b = await readJson(request);
       const seconds = Math.floor(Number(b.seconds));
-      if (!validKey(b.key, "file") || b.key.startsWith(".trash/") || b.key.startsWith(".links/")) throw new HttpError(400, "Invalid file.");
+      if (!validKey(b.key, "file") || b.key.startsWith(".trash/") || (b.key.startsWith(".links/") || b.key.startsWith(".notes/"))) throw new HttpError(400, "Invalid file.");
       if (!(seconds === 0 || (seconds >= 60 && seconds <= 604800))) throw new HttpError(400, "Choose a link length of up to 7 days, or never.");
       return json(await createLink(c, b.key, seconds));
     }
@@ -147,11 +149,18 @@ async function handle(request, env, ctx) {
       if (!validKey(b.key, "file")) throw new HttpError(400, "Invalid file.");
       return json(await removeLink(c, b.key));
     }
+    case "GET /api/notes":
+      return json({ notes: await readNotes(c) });
+    case "POST /api/note": {
+      const b = await readJson(request);
+      if (!validKey(b.key, "file") || b.key.startsWith(".notes/") || b.key.startsWith(".links/")) throw new HttpError(400, "Invalid file.");
+      return json(await setNote(c, b.key, b.text));
+    }
     case "POST /api/new-text":
       return json(await ops.newText(c, await readJson(request)));
     case "GET /api/largest": {
       const u = await bucketUsage(c);
-      const files = u.files.filter((f) => !f.key.endsWith("/") && !f.key.startsWith(".links/")).sort((a, z) => z.size - a.size).slice(0, 25).map((f) => ({ key: f.key, size: f.size, modified: f.modified }));
+      const files = u.files.filter((f) => !f.key.endsWith("/") && !(f.key.startsWith(".links/") || f.key.startsWith(".notes/"))).sort((a, z) => z.size - a.size).slice(0, 25).map((f) => ({ key: f.key, size: f.size, modified: f.modified }));
       return json({ files, partial: u.partial });
     }
     case "POST /api/move":

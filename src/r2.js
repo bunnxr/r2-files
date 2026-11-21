@@ -71,7 +71,7 @@ async function bucketUsage(c) {
   const byType = {};
   let count = 0;
   for (const f of r.files) {
-    if (f.key.endsWith("/") || f.key.startsWith(".links/")) continue; // folder markers and internal link records
+    if (f.key.endsWith("/") || (f.key.startsWith(".links/") || f.key.startsWith(".notes/"))) continue; // folder markers and internal link records
     count++;
     const t = typeOf(f.key);
     const e = byType[t] || (byType[t] = { count: 0, size: 0 });

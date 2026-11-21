@@ -80,7 +80,7 @@ export async function servePublic(request, c, url) {
   }
 
   const key = path;
-  if (!validKey(key, "file") || key.startsWith(".trash/") || key.startsWith(".links/")) return plain("Not found", 404);
+  if (!validKey(key, "file") || key.startsWith(".trash/") || (key.startsWith(".links/") || key.startsWith(".notes/"))) return plain("Not found", 404);
   const e = url.searchParams.get("e"), s = url.searchParams.get("s");
   const signed = !!(e && s);
   if (signed) {

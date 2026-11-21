@@ -44,13 +44,14 @@
         <h2 id="filesTitle">Files</h2>
         <div class="tools">
           <span id="count"></span>
+          <button id="btnSelect" class="btn" title="Select several files"></button>
           <select id="sortBy" aria-label="Sort by"><option value="name">Name</option><option value="size">Size</option><option value="date">Modified</option></select>
           <button id="sortDir" class="btn" title="Reverse order" aria-label="Reverse sort order"></button>
           <button id="btnView" class="btn" title="Switch grid / list" aria-label="Switch grid or list view"></button>
         </div>
       </div>
       <div id="trashbar" class="note card" hidden><span id="trashText"></span><button id="emptyTrash" class="btn danger">Empty trash</button></div>
-      <div id="selbar" class="selbar card" hidden><span id="selCount"></span><div class="selacts"><button id="selDl" class="btn">Download zip</button><button id="selZip" class="btn">Save zip in R2</button><button id="selMove" class="btn">Move</button><button id="selCopy" class="btn">Copy</button><button id="selDel" class="btn danger">Delete</button><button id="selRestore" class="btn primary" hidden>Restore</button><button id="selPurge" class="btn danger" hidden>Delete forever</button><button id="selClear" class="btn">Clear</button></div></div>
+      <div id="selbar" class="selbar card" hidden><span id="selCount"></span><div class="selacts"><button id="selDl" class="btn">Download zip</button><button id="selZip" class="btn">Save zip in R2</button><button id="selMove" class="btn">Move</button><button id="selCopy" class="btn">Copy</button><button id="selDel" class="btn danger">Delete</button><button id="selRestore" class="btn primary" hidden>Restore</button><button id="selPurge" class="btn danger" hidden>Delete forever</button><button id="selClear" class="btn">Clear</button><button id="selDone" class="btn">Done</button></div></div>
       <div id="list" class="list" data-view="list"></div>
     </section>
   </main>

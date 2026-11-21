@@ -29,7 +29,7 @@ async function drop(c, obj) { await r2(c, "DELETE", obj); }
 export async function lookupLink(c, name) {
   if (!validKey(nameObj(name), "file")) return null;
   const r = await read(c, nameObj(name));
-  const ok = r && typeof r.key === "string" && validKey(r.key, "file") && !r.key.startsWith(".trash/") && !r.key.startsWith(".links/");
+  const ok = r && typeof r.key === "string" && validKey(r.key, "file") && !r.key.startsWith(".trash/") && !(r.key.startsWith(".links/") || r.key.startsWith(".notes/"));
   return ok ? r : null;
 }
 

@@ -85,7 +85,7 @@ main{min-width:0}
 .acts{display:flex;justify-content:flex-end;gap:2px}
 .item.go{cursor:pointer}
 .list[data-view=list]{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
-.thead,[data-view=list] .item{display:grid;grid-template-columns:minmax(0,1fr) 96px 130px 104px;align-items:center;gap:10px}
+.thead,[data-view=list] .item{display:grid;grid-template-columns:minmax(0,1.3fr) 90px 120px minmax(0,1.2fr);align-items:center;gap:10px}
 .thead{padding:0 14px;height:42px;font-size:13px;font-weight:700;border-bottom:1px solid var(--border)}
 .thead span[data-sort]{cursor:pointer;user-select:none}
 [data-view=list] .item{padding:7px 14px;min-height:52px}
@@ -261,7 +261,9 @@ main{min-width:0}
  .tools{width:100%}
  #count{margin-right:auto}
  .thead{display:none}
- [data-view=list] .item{grid-template-columns:minmax(0,1fr) auto;padding:8px 6px 8px 12px;min-height:60px}
+ [data-view=list] .item{grid-template-columns:minmax(0,1fr);padding:8px 12px;min-height:60px}
+ [data-view=list] .nt{padding-left:50px;margin:0;font-size:13px}
+ [data-view=list] .nt.blank{display:none}
  [data-view=list] .sz,[data-view=list] .dt{display:none}
  [data-view=list] .sub{display:flex}
  [data-view=list] .acts [data-act=preview]{display:none}
@@ -369,3 +371,18 @@ body{background:#fff}
 .lg-bar{height:4px;border-radius:3px;background:var(--accent);opacity:.28;margin-top:5px}
 .lg-s{font-weight:700;color:var(--accent);white-space:nowrap}
 @media(max-width:899px){.usage{order:3}.nav a{background:#fff}.nav a.on{background:#e3edff}}
+
+/* ---- select mode, no row buttons, notes ---- */
+#list .sel{display:none}
+body.selmode #list .sel{display:block}
+.item{cursor:pointer}
+.nt{color:var(--muted);font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 8px;margin:-6px -8px;border-radius:8px;cursor:text}
+.nt:hover{background:var(--hover)}
+.nt.blank{opacity:0}
+.item:hover .nt.blank{opacity:.55}
+.nt-in{width:100%;height:32px;border:0;border-radius:8px;padding:0 10px;background:#fff;box-shadow:0 0 0 2px var(--accent);font:inherit;outline:0;color:var(--text)}
+[data-view=grid] .nt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;margin:0;padding:0;background:transparent}
+[data-view=grid] .nt.blank{display:none}
+#btnSelect{width:auto;padding:0 12px;gap:6px}
+#btnSelect.on{background:var(--accent);color:#fff}
+#selbar{align-items:center}

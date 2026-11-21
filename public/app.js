@@ -50,6 +50,7 @@ const P = {
   save: '<path d="M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
   chevL: '<path d="m15 6-6 6 6 6"/>',
+  note: '<path d="M5 4h14v11l-5 5H5zM14 20v-5h5M8 9h8M8 13h4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   database: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
   folderFill: '<path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/>',
@@ -65,7 +66,7 @@ const kindOf = (name) => { const e = name.indexOf('.') < 0 ? '' : name.split('.'
 const tile = (k, s) => (k === 'folder' ? '<span class="tile fold" style="--c:' + KC[k] + '">' + ico('folderFill', Math.round((s || 22) * 1.45)) + '</span>' : '<span class="tile" style="--c:' + KC[k] + '">' + ico(GLYPH[k], s || 22) + '</span>');
 
 /* ---------- state ---------- */
-const S = { sel: new Set(), prefix: '', folders: [], files: [], shown: [], loading: true, error: '', q: '', by: 'name', dir: 1, view: ls.get('fm-view') || BOOT.view, seq: 0 };
+const S = { notes: {}, selMode: false, sel: new Set(), prefix: '', folders: [], files: [], shown: [], loading: true, error: '', q: '', by: 'name', dir: 1, view: ls.get('fm-view') || BOOT.view, seq: 0 };
 
 /* ---------- api / toast / modal ---------- */
 async function api(path, body) {
@@ -145,7 +146,7 @@ function setSort(by, dir) {
 }
 function applyRoute() {
   const r = readRoute();
-  S.kind = r.kind; S.prefix = r.prefix; S.q = ''; $('#q').value = ''; S.sel.clear();
+  S.kind = r.kind; S.prefix = r.prefix; S.q = ''; $('#q').value = ''; setSelMode(false);
   if (S.kind) setSort('date', -1); else setSort('name', 1);
   load();
 }
@@ -155,6 +156,7 @@ async function load(silent) {
   const seq = ++S.seq;
   if (!silent) { S.loading = true; S.error = ''; render(); }
   try {
+    const np = api('/api/notes').then((r) => { S.notes = r.notes || {}; }).catch(() => {});
     if (S.kind) {
       const d = await api('/api/browse?type=' + encodeURIComponent(S.kind));
       if (seq !== S.seq) return;
@@ -174,6 +176,7 @@ async function load(silent) {
       S.total = S.files.length;
       if (d.truncated) toast('This folder is very large, so only the first items are shown. Use the search box or sub-folders.', 'info', 6000);
     }
+    await np;
     S.loading = false; S.error = '';
   } catch (e) {
     if (seq !== S.seq) return;
@@ -195,7 +198,7 @@ async function loadUsage() {
 
 function filtered() {
   const q = S.q.trim().toLowerCase();
-  const match = (i) => !q || i.name.toLowerCase().indexOf(q) >= 0 || (i.dir && i.dir.toLowerCase().indexOf(q) >= 0);
+  const match = (i) => !q || i.name.toLowerCase().indexOf(q) >= 0 || (i.dir && i.dir.toLowerCase().indexOf(q) >= 0) || (S.notes[i.key] || '').toLowerCase().indexOf(q) >= 0;
   const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   const cmp = S.by === 'size' ? (a, b) => a.size - b.size : S.by === 'date' ? (a, b) => (a.modified > b.modified ? 1 : a.modified < b.modified ? -1 : 0) : byName;
   const folders = S.folders.filter(match).sort(byName);
@@ -204,26 +207,15 @@ function filtered() {
 }
 
 function itemHtml(it, i) {
-  const k = kindOf(it.name), pub = !it.trash && isPublicKey(it.key);
-  let acts = '';
-  if (it.trash) {
-    acts += '<button class="ib" data-act="restore" title="Restore" aria-label="Restore ' + esc(it.name) + '">' + ico('retry', 17) + '</button>';
-    acts += '<button class="ib danger" data-act="purge" title="Delete forever" aria-label="Delete ' + esc(it.name) + ' forever">' + ico('trash', 17) + '</button>';
-  } else {
-    if (isViewable(it.name)) acts += '<button class="ib" data-act="preview" title="Preview" aria-label="Preview ' + esc(it.name) + '">' + ico('eye', 17) + '</button>';
-    acts += '<button class="ib" data-act="download" title="Download" aria-label="Download ' + esc(it.name) + '">' + ico('download', 17) + '</button>';
-    acts += '<button class="ib" data-act="share" title="' + (pub ? 'Copy public link' : 'Share link') + '" aria-label="' + (pub ? 'Copy public link for ' : 'Share ') + esc(it.name) + '">' + ico(pub ? 'globe' : 'link', 17) + '</button>';
-    acts += '<button class="ib" data-act="more" title="More" aria-label="More actions for ' + esc(it.name) + '">' + ico('more', 17) + '</button>';
-  }
-  const date = esc(fdate(it.modified));
-  return '<div class="item' + (!it.trash && (isViewable(it.name) || isZip(it.name)) ? ' go' : '') + '" data-i="' + i + '"><div class="main"><input type="checkbox" class="sel" data-sel aria-label="Select ' + esc(it.name) + '"' + (S.sel.has(it.key) ? ' checked' : '') + '>' + tile(k, 20) + '<div class="nm"><b title="' + esc(it.trash ? it.orig : it.key) + '">' + esc(it.name) + '</b>' + (it.dir ? '<small class="path">' + esc(it.dir) + '</small>' : '') + '<small class="sub"><span>' + fmt(it.size) + '</span><span>' + date + '</span></small></div></div><span class="sz">' + fmt(it.size) + '</span><span class="dt">' + date + '</span><div class="acts">' + acts + '</div></div>';
+  const k = kindOf(it.name), note = S.notes[it.key] || '', date = esc(fdate(it.modified));
+  return '<div class="item go" data-i="' + i + '"><div class="main"><input type="checkbox" class="sel" data-sel aria-label="Select ' + esc(it.name) + '"' + (S.sel.has(it.key) ? ' checked' : '') + '>' + tile(k, 20) + '<div class="nm"><b title="' + esc(it.trash ? it.orig : it.key) + '">' + esc(it.name) + '</b>' + (it.dir ? '<small class="path">' + esc(it.dir) + '</small>' : '') + '<small class="sub"><span>' + fmt(it.size) + '</span><span>' + date + '</span></small></div></div><span class="sz">' + fmt(it.size) + '</span><span class="dt">' + date + '</span><span class="nt' + (note ? '' : ' blank') + '" data-note="' + i + '" title="' + esc(note || 'Add a note') + '">' + esc(note || 'Add note') + '</span></div>';
 }
 function folderHtml(f, i) {
   return '<div class="fcard" data-f="' + i + '"><div class="f-top">' + tile('folder', 22) + '<button class="ib danger" data-act="delete" title="Move folder to trash" aria-label="Move folder ' + esc(f.name) + ' to trash">' + ico('trash', 17) + '</button></div><b title="' + esc(f.name) + '">' + esc(f.name) + '</b><small>Folder' + (isPublicKey(f.key) ? '<span class="badge">Public</span>' : '') + '</small></div>';
 }
 function theadHtml() {
   const a = (k) => (S.by === k ? (S.dir > 0 ? ' ↑' : ' ↓') : '');
-  return '<div class="thead"><span class="th-n"><input type="checkbox" class="sel" data-selall aria-label="Select all"><span data-sort="name">Name' + a('name') + '</span></span><span data-sort="size">Size' + a('size') + '</span><span data-sort="date">Modified' + a('date') + '</span><span></span></div>';
+  return '<div class="thead"><span class="th-n"><input type="checkbox" class="sel" data-selall aria-label="Select all"><span data-sort="name">Name' + a('name') + '</span></span><span data-sort="size">Size' + a('size') + '</span><span data-sort="date">Modified' + a('date') + '</span><span>Notes</span></div>';
 }
 
 function renderCrumbs() {
@@ -299,9 +291,11 @@ $('#list').addEventListener('click', (e) => {
   const row = e.target.closest('[data-i]'); if (!row) return;
   const it = S.shown[+row.dataset.i]; if (!it) return;
   if (e.target.closest('[data-sel]')) { toggleSel(it.key, e.target.checked); return; }
+  if (e.target.closest('[data-note]')) { startNoteEdit(row, it); return; }
+  if (S.selMode) { toggleSel(it.key, !S.sel.has(it.key)); const cb = row.querySelector('[data-sel]'); if (cb) cb.checked = S.sel.has(it.key); return; }
   if (act) { const a = act.dataset.act; if (a === 'download') download(it); else if (a === 'preview') preview(it); else if (a === 'share') { if (isPublicKey(it.key)) copyPublic(it); else openShare(it); } else if (a === 'more') { const r = act.getBoundingClientRect(); openMore(it, r.left, r.bottom + 4); } else if (a === 'restore') restoreItems([it]); else if (a === 'purge') purgeItems([it]); return; }
-  if (it.trash) return;
-  if (isViewable(it.name)) preview(it); else if (isZip(it.name)) openArchive(it);
+  if (it.trash) { ctxItem(it, e.clientX, e.clientY); return; }
+  if (isViewable(it.name)) preview(it); else if (isZip(it.name)) openArchive(it); else ctxItem(it, e.clientX, e.clientY);
 });
 
 /* ---------- download / preview / delete / new folder ---------- */
@@ -536,10 +530,12 @@ window.addEventListener('drop', async (e) => {
 /* ---------- selection, archives (browse / extract) and "zip selected" ---------- */
 function renderSel() {
   const n = S.sel.size, tr = S.kind === 'trash';
-  $('#selbar').hidden = !n;
-  ['selDl', 'selZip', 'selMove', 'selCopy', 'selDel'].forEach((id) => { $('#' + id).hidden = tr; });
-  ['selRestore', 'selPurge'].forEach((id) => { $('#' + id).hidden = !tr; });
+  $('#selbar').hidden = !(n || S.selMode);
+  $('#selClear').hidden = !n;
+  ['selDl', 'selZip', 'selMove', 'selCopy', 'selDel'].forEach((id) => { $('#' + id).hidden = tr || !n; });
+  ['selRestore', 'selPurge'].forEach((id) => { $('#' + id).hidden = !tr || !n; });
   if (n) { let sz = 0; S.files.forEach((f) => { if (S.sel.has(f.key)) sz += f.size; }); $('#selCount').textContent = n + (n === 1 ? ' file selected' : ' files selected') + ' (' + fmt(sz) + ')'; }
+  if (!n) $('#selCount').textContent = 'Tap files to select them';
   const all = $('[data-selall]');
   if (all) { const c = S.shown.filter((f) => S.sel.has(f.key)).length; all.checked = c > 0 && c === S.shown.length; all.indeterminate = c > 0 && c < S.shown.length; }
 }
@@ -779,7 +775,7 @@ function report(verb, r) {
   const n = r.done + (r.done === 1 ? ' file' : ' files');
   if (r.errors.length) toast(verb + ' ' + n + '. ' + r.errors.length + ' failed: ' + r.errors[0], 'err', 9000);
   else toast(r.canceled ? 'Stopped after ' + n + '.' : verb + ' ' + n + '.', r.canceled ? 'info' : 'ok');
-  S.sel.clear(); load(true); loadUsage();
+  setSelMode(false); load(true); loadUsage();
 }
 
 /* --- trash --- */
@@ -900,14 +896,14 @@ async function openShare(it) {
   };
 }
 function fileRows(it) {
-  if (it.trash) return [['restore', 'retry', 'Restore'], ['purge', 'trash', 'Delete forever', true]];
+  if (it.trash) return [['restore', 'retry', 'Restore'], ['note', 'note', S.notes[it.key] ? 'Edit note…' : 'Add note…'], ['select', 'check', 'Select'], '-', ['purge', 'trash', 'Delete forever', true]];
   const rows = [];
   if (isViewable(it.name)) rows.push(['preview', 'eye', 'Preview']);
   if (isZip(it.name)) rows.push(['open', 'archive', 'Browse archive contents']);
   rows.push(['download', 'download', 'Download'], '-', ['share', 'link', 'Share link…']);
   if (isPublicKey(it.key)) rows.push(['public', 'globe', 'Copy public link']);
   if (isEditable(it.name, it.size)) rows.push(['edit', 'edit', 'Edit text']);
-  rows.push('-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['delete', 'trash', 'Move to trash', true]);
+  rows.push(['note', 'note', S.notes[it.key] ? 'Edit note…' : 'Add note…'], ['select', 'check', 'Select'], '-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['delete', 'trash', 'Move to trash', true]);
   return rows;
 }
 function runFileAction(a, it) {
@@ -922,6 +918,8 @@ function runFileAction(a, it) {
   else if (a === 'delete') del(it);
   else if (a === 'restore') restoreItems([it]);
   else if (a === 'purge') purgeItems([it]);
+  else if (a === 'note') openNote(it);
+  else if (a === 'select') { setSelMode(true); toggleSel(it.key, true); render(); }
 }
 async function openMore(it, x, y) { const a = await showMenu(it.name, fileRows(it), x, y); if (a) runFileAction(a, it); }
 
@@ -1167,8 +1165,9 @@ function popMenu(rows, x, y) {
     document.body.appendChild(el); ctxEl = el;
     el.style.left = Math.max(8, Math.min(x, innerWidth - el.offsetWidth - 8)) + 'px';
     el.style.top = Math.max(8, Math.min(y, innerHeight - el.offsetHeight - 8)) + 'px';
-    const done = (v) => { document.removeEventListener('mousedown', away, true); document.removeEventListener('keydown', key, true); window.removeEventListener('scroll', away, true); window.removeEventListener('resize', away); if (ctxEl === el) closeCtx(); resolve(v); };
-    const away = (e) => { if (!el.contains(e.target)) done(null); };
+    const done = (v) => { document.removeEventListener('mousedown', away, true); document.removeEventListener('keydown', key, true); window.removeEventListener('scroll', away, true); window.removeEventListener('resize', away); if (ctxEl === el) closeCtx(); ctxClosedAt = Date.now(); resolve(v); };
+    const born = Date.now();
+    const away = (e) => { if (e.type === 'scroll' && Date.now() - born < 400) return; if (!el.contains(e.target)) done(null); };
     const key = (e) => { if (e.key === 'Escape') done(null); };
     el.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) done(b.dataset.pick); });
     document.addEventListener('mousedown', away, true); document.addEventListener('keydown', key, true); window.addEventListener('scroll', away, true); window.addEventListener('resize', away);
@@ -1207,8 +1206,8 @@ async function ctxFolder(f, x, y) {
 }
 async function ctxEmpty(x, y) {
   if (S.kind === 'trash') { const a = await showMenu('Trash', [['empty', 'trash', 'Empty trash', true]], x, y); if (a) emptyTrash(); return; }
-  const a = await showMenu('Create or upload', newRows(), x, y);
-  if (a) doNew(a);
+  const a = await showMenu('Create or upload', newRows().concat(S.files.length ? ['-', ['selmode', 'check', 'Select files']] : []), x, y);
+  if (a === 'selmode') setSelMode(true); else if (a) doNew(a);
 }
 const NOCTX = 'input,textarea,select,button,a,label,.nav,.navcard,.usage,.selbar,.note,.thead,.searchbar,.sec-h,.crumbs,.ctx,.sheet,.uploads,.job,.fab,#modal';
 function ctxAt(t, x, y) {
@@ -1315,6 +1314,55 @@ async function openLargest() {
       return '<div class="lg-row" data-lg="' + esc(f.key) + '">' + tile(kindOf(nm), 18) + '<div class="lg-n"><b title="' + esc(orig) + '">' + esc(nm) + '</b><small>' + esc((i > 0 ? orig.slice(0, i) : 'Top level') + (trash ? ' (in trash)' : '')) + '</small><div class="lg-bar" style="width:' + Math.max(2, (f.size / max) * 100) + '%"></div></div><span class="lg-s">' + fmt(f.size) + '</span></div>';
     }).join('') + '</div>' : '<div class="empty"><p>No files yet.</p></div>';
   } catch (e) { if ($('#lgBody')) $('#lgBody').innerHTML = '<div class="empty"><p>' + esc(e.message) + '</p></div>'; }
+}
+
+/* ---------- select mode and per-file notes ---------- */
+$('#btnSelect').innerHTML = ico('check', 16) + '<span class="lbl">Select</span>';
+let ctxClosedAt = 0;
+function setSelMode(on) {
+  S.selMode = on;
+  document.body.classList.toggle('selmode', on);
+  $('#btnSelect').classList.toggle('on', on);
+  if (!on) { S.sel.clear(); document.querySelectorAll('#list [data-sel]').forEach((cb) => { cb.checked = false; }); }
+  renderSel();
+}
+$('#btnSelect').onclick = () => setSelMode(!S.selMode);
+$('#selDone').onclick = () => setSelMode(false);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.selMode && modalEl.hidden && Date.now() - ctxClosedAt > 150) setSelMode(false); });
+
+function paintNote(cell, key) { const n = S.notes[key] || ''; cell.classList.toggle('blank', !n); cell.title = n || 'Add a note'; cell.textContent = n || 'Add note'; }
+async function saveNote(key, text) {
+  const r = await api('/api/note', { key, text });
+  if (r.text) S.notes[key] = r.text; else delete S.notes[key];
+}
+function startNoteEdit(row, it) {
+  const cell = row.querySelector('[data-note]');
+  if (!cell || cell.querySelector('input')) return;
+  const old = S.notes[it.key] || '';
+  cell.classList.remove('blank');
+  cell.innerHTML = '<input class="nt-in" maxlength="2000" placeholder="Write a note" value="' + esc(old) + '">';
+  const inp = cell.firstChild;
+  inp.focus(); inp.select();
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    const v = inp.value.trim();
+    if (save && v !== old) { try { await saveNote(it.key, v); } catch (e) { toast(e.message, 'err'); } }
+    paintNote(cell, it.key);
+  };
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.stopPropagation(); finish(false); } });
+  inp.addEventListener('blur', () => finish(true));
+  inp.addEventListener('click', (e) => e.stopPropagation());
+}
+function openNote(it) {
+  const old = S.notes[it.key] || '';
+  openModal('<form class="dlg wide" role="dialog" aria-modal="true"><h2>Note for “' + esc(it.name) + '”</h2><textarea id="noteText" class="field area" style="height:140px" maxlength="2000" placeholder="Write a note about this file…"></textarea><div class="dlg-acts">' + (old ? '<button type="button" class="btn" data-x="clear">Remove note</button>' : '') + '<button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Save</button></div></form>');
+  const t = $('#noteText');
+  t.value = old; t.focus();
+  const save = async (v) => { try { await saveNote(it.key, v); closeModal(); render(); } catch (e) { toast(e.message, 'err'); } };
+  $('form', modalEl).onsubmit = (e) => { e.preventDefault(); save(t.value.trim()); };
+  modalEl.onclick = (e) => { const x = e.target.closest('[data-x]'); if (!x) return; if (x.dataset.x === 'clear') save(''); else closeModal(); };
 }
 
 /* ---------- start ---------- */

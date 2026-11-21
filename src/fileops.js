@@ -3,6 +3,7 @@
 import { HttpError, validKey, validPrefix, sanitizeName } from "./util.js";
 import { r2, xmlEsc, xmlTag, r2Error, parseList, uniqueKey } from "./r2.js";
 import { encPath } from "./sigv4.js";
+import { carryNotes, dropNotes } from "./notes.js";
 
 const COPY_SINGLE_MAX = 4 * 1024 ** 3; // CopyObject up to 4 GiB; bigger files are copied in 1 GiB parts
 const COPY_PART = 1024 ** 3;
@@ -14,7 +15,7 @@ const items = (v, max) => {
 };
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 const okId = (s) => typeof s === "string" && /^[a-z0-9]{4,20}$/.test(s);
-const fileKey = (k) => validKey(k, "file") && !k.startsWith(".trash/") && !k.startsWith(".links/");
+const fileKey = (k) => validKey(k, "file") && !k.startsWith(".trash/") && !(k.startsWith(".links/") || k.startsWith(".notes/"));
 
 async function remove(c, key) {
   const res = await r2(c, "DELETE", key);
@@ -65,12 +66,13 @@ async function moveOne(c, key, destFolder, mode) {
 export async function moveBatch(c, b) {
   const keys = items(b.keys, 8);
   const dest = typeof b.dest === "string" ? b.dest : "";
-  if (!validPrefix(dest) || dest.startsWith(".trash/") || dest.startsWith(".links/")) throw new HttpError(400, "Invalid destination folder.");
+  if (!validPrefix(dest) || dest.startsWith(".trash/") || (dest.startsWith(".links/") || dest.startsWith(".notes/"))) throw new HttpError(400, "Invalid destination folder.");
   const mode = b.mode === "copy" ? "copy" : "move";
-  const out = { done: [], errors: [] };
+  const out = { done: [], errors: [] }, pairs = [];
   for (const key of keys) {
-    try { out.done.push(await moveOne(c, key, dest, mode)); } catch (e) { out.errors.push({ key, error: e.message }); }
+    try { const r = await moveOne(c, key, dest, mode); out.done.push(r); pairs.push({ from: r.from, to: r.to, keep: mode === "copy" }); } catch (e) { out.errors.push({ key, error: e.message }); }
   }
+  await carryNotes(c, pairs);
   return out;
 }
 
@@ -79,15 +81,17 @@ async function trashOne(c, key, id) {
   if (!validKey(to, "file")) throw new HttpError(400, "The path is too long to move to the trash.");
   await copyObject(c, key, to);
   await remove(c, key);
+  return to;
 }
 
 export async function trashBatch(c, b) {
   const keys = items(b.keys, 12);
   const id = okId(b.id) ? b.id : newId();
-  const out = { id, done: 0, errors: [] };
+  const out = { id, done: 0, errors: [] }, pairs = [];
   for (const key of keys) {
-    try { if (!fileKey(key)) throw new HttpError(400, "Invalid file."); await trashOne(c, key, id); out.done++; } catch (e) { out.errors.push({ key, error: e.message }); }
+    try { if (!fileKey(key)) throw new HttpError(400, "Invalid file."); pairs.push({ from: key, to: await trashOne(c, key, id) }); out.done++; } catch (e) { out.errors.push({ key, error: e.message }); }
   }
+  await carryNotes(c, pairs);
   return out;
 }
 
@@ -99,20 +103,21 @@ export async function trashFolderBatch(c, b) {
   const res = await r2(c, "GET", "", { query: { "list-type": "2", "max-keys": "12", prefix } });
   if (!res.ok) throw new HttpError(502, r2Error(res));
   const keys = parseList(res.text).files.map((f) => f.key).filter((k) => k.startsWith(prefix));
-  const out = { id, listed: keys.length, moved: 0, errors: [] };
+  const out = { id, listed: keys.length, moved: 0, errors: [] }, pairs = [];
   for (const key of keys) {
     try {
       if (key.endsWith("/")) await remove(c, key); // empty-folder markers are not worth keeping
-      else await trashOne(c, key, id);
+      else pairs.push({ from: key, to: await trashOne(c, key, id) });
       out.moved++;
     } catch (e) { out.errors.push({ key, error: e.message }); }
   }
+  await carryNotes(c, pairs);
   return out;
 }
 
 export async function restoreBatch(c, b) {
   const keys = items(b.keys, 8);
-  const out = { done: [], errors: [] };
+  const out = { done: [], errors: [] }, pairs = [];
   for (const key of keys) {
     try {
       if (!validKey(key, "file") || !key.startsWith(".trash/")) throw new HttpError(400, "Not a trashed file.");
@@ -121,9 +126,10 @@ export async function restoreBatch(c, b) {
       const to = await uniqueKey(c, dirOf(orig), baseOf(orig));
       await copyObject(c, key, to);
       await remove(c, key);
-      out.done.push({ from: key, to });
+      out.done.push({ from: key, to }); pairs.push({ from: key, to });
     } catch (e) { out.errors.push({ key, error: e.message }); }
   }
+  await carryNotes(c, pairs);
   return out;
 }
 
@@ -132,6 +138,7 @@ export async function emptyTrashBatch(c) {
   if (!res.ok) throw new HttpError(502, r2Error(res));
   const keys = parseList(res.text).files.map((f) => f.key);
   await Promise.all(keys.map((k) => remove(c, k)));
+  await dropNotes(c, keys);
   return { deleted: keys.length };
 }
 
@@ -165,7 +172,7 @@ export async function listParts(c, b) {
 // "New text file": creates a file that does not exist yet (never overwrites)
 export async function newText(c, b) {
   const prefix = typeof b.prefix === "string" ? b.prefix : "";
-  if (!validPrefix(prefix) || prefix.startsWith(".trash/") || prefix.startsWith(".links/")) throw new HttpError(400, "Invalid folder.");
+  if (!validPrefix(prefix) || prefix.startsWith(".trash/") || (prefix.startsWith(".links/") || prefix.startsWith(".notes/"))) throw new HttpError(400, "Invalid folder.");
   let name = sanitizeName(b.name);
   if (!name.includes(".")) name += ".txt";
   const body = new TextEncoder().encode(typeof b.text === "string" ? b.text : "");
