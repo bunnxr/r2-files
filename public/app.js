@@ -129,7 +129,7 @@ const UPV = 'upload-password'; // the settings view: #view=upload-password
 const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other', 'trash', 'links', UPV];
 const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash', links: 'Links', [UPV]: 'Upload password' };
 const CAT = { image: ['Images', '#3b82f6', 'image'], video: ['Videos', '#ef4444', 'video'], audio: ['Audio', '#8b5cf6', 'audio'], doc: ['Documents', '#22a06b', 'doc'], archive: ['Archives', '#f59e0b', 'archive'], other: ['Other', '#64748b', 'file'], trash: ['Trash', '#94a3b8', 'trash'] };
-const NAV = [['', 'Files', 'folder'], ['links', 'Links', 'link'], ['trash', 'Trash', 'trash'], [UPV, 'Upload password', 'key']];
+const NAV = [['', 'Files', 'folder'], ['links', 'Links', 'link'], [UPV, 'Upload password', 'key'], ['trash', 'Trash', 'trash']];
 S.kind = ''; S.usage = null; S.total = 0; S.shownFolders = [];
 const L = { list: [], shown: [], loading: false, error: '', off: false, seq: 0, activeCount: 0, filter: 'all' }; // Links page
 const U = { loading: false, error: '', password: '', auto: 'off', rotatedAt: 0, draft: null, busy: false, seq: 0 }; // Upload password page
@@ -1616,7 +1616,7 @@ function openNote(it) {
    which sits behind the normal Access login. Generate only fills the box;
    nothing is stored until Save. */
 const PW_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; // 62 characters
-const PW_OK = /^[a-zA-Z0-9]{7}$/;
+const PW_OK = /^[a-zA-Z0-9]{7,15}$/; // generated ones are 7; typed ones may be up to 15
 /* Same rule as generatePassword() in src/upauth.js: bytes at or above 248
    (the largest multiple of 62 that fits in a byte) are thrown away, so no
    character is more likely than any other. */
@@ -1662,11 +1662,11 @@ function renderUpAuth() {
     '<p class="up-note">The terminal upload client asks for this password. The web app itself stays behind your Cloudflare Access login.</p>' +
     '<label class="up-lbl" for="upPass">Password</label>' +
     '<div class="copyrow">' +
-      '<input id="upPass" class="field mono" maxlength="7" size="7" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" value="' + esc(val) + '" aria-label="Upload password">' +
+      '<input id="upPass" class="field mono" maxlength="15" size="15" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" value="' + esc(val) + '" aria-label="Upload password">' +
       '<button class="btn" data-up="gen">' + ico('retry', 16) + 'Generate</button>' +
       '<button class="btn" data-up="copy">' + ico('copy', 16) + 'Copy</button>' +
     '</div>' +
-    '<small class="up-hint">Exactly 7 characters: letters and numbers.</small>' +
+    '<small class="up-hint">7 to 15 characters: letters and numbers. Generate makes a 7-character one.</small>' +
     '<div class="up-row">' +
       '<div class="up-txt"><b>Auto-rotate every 6 days</b><small>' + (on ? 'A new password is generated for you.' : 'The password never changes on its own.') + '</small></div>' +
       '<button class="sw' + (on ? ' on' : '') + '" role="switch" aria-checked="' + (on ? 'true' : 'false') + '" data-up="auto" aria-label="Auto-rotate every 6 days"><i></i></button>' +
@@ -1710,7 +1710,7 @@ $('#upBody').addEventListener('click', (e) => {
   if (a === 'auto') { saveUpAuth({ auto: U.auto === 'on' ? 'off' : 'on' }, U.auto === 'on' ? 'Auto-rotate off' : 'Auto-rotate on'); return; }
   if (a === 'save') {
     const v = ((U.draft === null ? U.password : U.draft) || '').trim();
-    if (!PW_OK.test(v)) { toast('The password must be exactly 7 characters: letters and numbers only.', 'err'); return; }
+    if (!PW_OK.test(v)) { toast('The password must be 7 to 15 characters: letters and numbers only.', 'err'); return; }
     if (v === U.password) { toast('That is already the password.', 'info'); return; }
     saveUpAuth({ password: v }, 'Password saved');
     return;

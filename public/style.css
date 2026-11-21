@@ -437,7 +437,7 @@ body.selmode #list .sel{display:block}
 .up-note{margin:0 0 16px;color:var(--muted)}
 .up-lbl{display:block;margin:0 0 6px;font-weight:600;font-size:13px}
 .upcard .copyrow{margin-top:0}
-.upcard .field.mono{flex:none;width:11ch;font:600 15px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.06em;background:#fff;box-shadow:0 0 0 1px #dde3ea}
+.upcard .field.mono{flex:none;width:20ch;font:600 15px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.06em;background:#fff;box-shadow:0 0 0 1px #dde3ea}
 .upcard .field.mono:focus{box-shadow:0 0 0 2px var(--accent)}
 .up-hint{display:block;margin:8px 0 0;color:var(--muted);font-size:13px}
 .up-next{margin-top:10px;font-weight:600;color:var(--text)}
