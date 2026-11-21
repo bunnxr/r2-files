@@ -6,7 +6,7 @@
 import { validKey, isInternal, viewMime } from "./util.js";
 import { presign, encPath } from "./sigv4.js";
 import { contentDisposition } from "./uploads.js";
-import { lookupLink } from "./links.js";
+import { lookupLink, dropExpired } from "./links.js";
 
 const enc = new TextEncoder();
 const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -78,8 +78,8 @@ export async function servePublic(request, c, url) {
 
   if (path.indexOf("/") < 0) { // short link: https://HOST/charlie.zip
     const rec = await lookupLink(c, path);
-    if (!rec) return plain("Not found", 404);
-    if (rec.exp && rec.exp * 1000 < Date.now()) return plain("This link has expired.", 410);
+    if (!rec) return plain("This link does not exist or has expired.", 404);
+    if (rec.exp && rec.exp * 1000 < Date.now()) { await dropExpired(c, path); return plain("This link has expired.", 410); }
     // mode "download" always downloads; "view" opens in the browser (?dl=1 still downloads); no mode = browser decides
     return streamObject(c, request, rec.key, { dl: dl || rec.mode === "download", view: rec.mode === "view", cors: true, cache: rec.exp ? "private, max-age=0, must-revalidate" : "public, max-age=300" });
   }

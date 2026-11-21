@@ -139,12 +139,13 @@ export async function listLinks(c, after) {
     const name = obj.slice(nameObj("").length);
     const rec = await read(c, obj).catch(() => null);
     if (!rec || typeof rec.key !== "string") return { name, url: urlFor(c, name), key: "", exp: 0, t: 0, active: false, missing: true, size: 0 };
+    if (!alive(rec)) { await drop(c, obj).catch(() => {}); return null; } // expired links are deleted, not listed
     const h = await r2(c, "HEAD", rec.key).catch(() => null);
     const missing = !h || h.status === 404;
     const size = h && h.ok ? Number(h.headers.get("content-length")) || 0 : 0;
     return { name, url: urlFor(c, name), key: rec.key, exp: rec.exp || 0, t: rec.t || 0, active: alive(rec), missing, size, mode: rec.mode || "auto" };
   }));
-  return { links, next: p.truncated && keys.length ? keys[keys.length - 1].slice(nameObj("").length) : "" };
+  return { links: links.filter(Boolean), next: p.truncated && keys.length ? keys[keys.length - 1].slice(nameObj("").length) : "" };
 }
 
 // b: { name, exp?, newName?, key? }   exp: unix seconds, 0 = never
@@ -158,7 +159,7 @@ export async function updateLink(c, b) {
 
   if (b.exp !== undefined) {
     const exp = Math.floor(Number(b.exp));
-    if (!Number.isFinite(exp) || exp < 0 || exp > now + MAX_DAYS * 86400) throw new HttpError(400, "Pick an expiry within " + MAX_DAYS + " days, or never.");
+    if (!Number.isFinite(exp) || exp < 0 || (exp && exp <= now) || exp > now + MAX_DAYS * 86400) throw new HttpError(400, "Pick an expiry in the future, within " + MAX_DAYS + " days, or never.");
     out.exp = exp;
   }
   if (b.key !== undefined && b.key !== rec.key) {
@@ -202,6 +203,33 @@ export async function addLink(c, b) {
   const rec = withMode({ key, exp, t: now }, b.mode);
   await write(c, nameObj(name), rec);
   return { name, url: urlFor(c, name), key, exp, t: now, active: true, missing: false, size: Number(h.headers.get("content-length")) || 0, mode: rec.mode || "auto" };
+}
+
+// An expired link was opened: remove its record (the file's main-link pointer is left; it is
+// harmless, and Share re-uses that address for the next link of the same file).
+export async function dropExpired(c, name) {
+  await drop(c, nameObj(name)).catch(() => {});
+}
+
+// Hourly cron (:30): delete expired links nobody opened. Works through the links a slice at a time
+// (remembering where it stopped in .links/sweep.json) to stay under the 50-subrequest cap.
+const SWEEP = ".links/sweep.json";
+export async function sweepExpired(c) {
+  const cur = (await read(c, SWEEP).catch(() => null)) || {};
+  const query = { "list-type": "2", "max-keys": "22", prefix: ".links/n/" }; // 1 + 1 + 22 reads + up to 22 deletes + 1 = 47
+  if (cur.after) query["start-after"] = cur.after;
+  const res = await r2(c, "GET", "", { query });
+  if (!res.ok) throw new HttpError(502, r2Error(res));
+  const p = parseList(res.text);
+  const keys = p.files.map((f) => f.key);
+  let deleted = 0;
+  await Promise.all(keys.map(async (obj) => {
+    const rec = await read(c, obj).catch(() => null);
+    if (rec && !alive(rec)) { await drop(c, obj).catch(() => {}); deleted++; }
+  }));
+  // next run continues after this slice; at the end of the list it starts again from the top
+  await write(c, SWEEP, { after: p.truncated && keys.length ? keys[keys.length - 1] : "", t: Date.now() });
+  return { checked: keys.length, deleted };
 }
 
 export async function deleteLink(c, name) {

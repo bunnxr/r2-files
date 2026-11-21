@@ -127,9 +127,9 @@ $('#upClear').innerHTML = ico('broom', 17);
 /* ---------- browsing ---------- */
 const UPV = 'upload-password'; // the settings view: #view=upload-password
 const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other', 'trash', 'links', UPV];
-const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash', links: 'Links', [UPV]: 'Upload password' };
+const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash', links: 'Links', [UPV]: 'Uploads' };
 const CAT = { image: ['Images', '#3b82f6', 'image'], video: ['Videos', '#ef4444', 'video'], audio: ['Audio', '#8b5cf6', 'audio'], doc: ['Documents', '#22a06b', 'doc'], archive: ['Archives', '#f59e0b', 'archive'], other: ['Other', '#64748b', 'file'], trash: ['Trash', '#94a3b8', 'trash'] };
-const NAV = [['', 'Files', 'folder'], ['links', 'Links', 'link'], [UPV, 'Upload password', 'key'], ['trash', 'Trash', 'trash']];
+const NAV = [['', 'Files', 'folder'], ['links', 'Links', 'link'], [UPV, 'Uploads', 'key'], ['trash', 'Trash', 'trash']];
 S.kind = ''; S.usage = null; S.total = 0; S.shownFolders = [];
 const L = { list: [], shown: [], loading: false, error: '', off: false, seq: 0, activeCount: 0, filter: 'all' }; // Links page
 const U = { loading: false, error: '', password: '', auto: 'off', rotatedAt: 0, draft: null, busy: false, seq: 0 }; // Upload password page
@@ -1037,8 +1037,8 @@ function openValidity(l) {
     '<div class="lk-cur" id="lkCur">' + esc(cur()) + '</div>' +
     '<span class="lbl2">Works for (from now)</span><div class="seg3">' + opts.map((o) => '<button class="btn" data-v="' + o[0] + '">' + o[1] + '</button>').join('') + '</div>' +
     '<span class="lbl2">Or until a date</span><div class="copyrow"><input id="lkDate" class="field" type="datetime-local" min="' + toLocalInput(new Date()) + '" max="' + toLocalInput(new Date(Date.now() + 364 * 86400000)) + '" value="' + toLocalInput(def) + '"><button class="btn primary" data-v="date">Set</button></div>' +
-    '<small class="hint">The link address stays the same; only how long it works changes.</small>' +
-    '<div class="dlg-acts">' + (lkState(l) === 'active' ? '<button class="btn danger" data-v="off">Turn off now</button>' : '') + '<button class="btn" data-x="no">Close</button></div></div>');
+    '<small class="hint">The link address stays the same; only how long it works changes. When it expires, the link is deleted.</small>' +
+    '<div class="dlg-acts"><button class="btn" data-x="no">Close</button></div></div>');
   modalEl.onclick = async (e) => {
     if (e.target.closest('[data-x]')) { closeModal(); return; }
     const b = e.target.closest('[data-v]'); if (!b) return;
@@ -1047,9 +1047,8 @@ function openValidity(l) {
       const t = new Date($('#lkDate').value).getTime();
       if (!t || t <= Date.now()) { toast('Pick a date in the future.', 'err'); return; }
       exp = Math.floor(t / 1000);
-    } else if (v === 'off') exp = nowS();
-    else exp = +v ? nowS() + +v : 0;
-    if (await lkUpdate(l, { exp }, v === 'off' ? 'Link turned off.' : 'Validity updated.')) closeModal();
+    } else exp = +v ? nowS() + +v : 0;
+    if (await lkUpdate(l, { exp }, 'Validity updated.')) closeModal();
   };
 }
 // Extra link for a file, separate from its other links (own address, own validity)
@@ -1128,7 +1127,7 @@ async function deleteLinks(list, ask) {
   if (ask) {
     const ok = list.length === 1
       ? await confirmDlg('Delete this link?', list[0].url.replace(/^https?:\/\//, '') + ' will stop working. The file itself is not touched.', 'Delete link')
-      : await confirmDlg('Delete ' + list.length + ' links?', 'All expired links and links whose file is missing will be removed. Files are not touched.', 'Delete links');
+      : await confirmDlg('Delete ' + list.length + ' links?', 'All links whose file is missing will be removed.', 'Delete links');
     if (!ok) return;
   }
   const r = await runBatches('Deleting links', list, 1, async (ch) => { await api('/api/link-delete', { name: ch[0].name }); return {}; });
@@ -1146,7 +1145,6 @@ async function linkMenu(l, x, y) {
   }
   if (st !== 'broken') rows.push(['newfor', 'plus', 'New link for this file…'], ['goto', 'folder', 'Show file in folder']);
   if (l.key) rows.push(['same', 'search', 'All links of this file']);
-  if (st === 'active') rows.push('-', ['off', 'x', 'Turn off now']);
   rows.push('-', ['del', 'trash', 'Delete link', true]);
   const a = await showMenu(l.url.replace(/^https?:\/\//, ''), rows, x, y);
   if (a) linkAct(a, l);
@@ -1162,7 +1160,6 @@ function linkAct(a, l, el) {
   else if (a === 'mview') lkUpdate(l, { mode: 'view' }, 'The link now opens in the browser.');
   else if (a === 'mdl') lkUpdate(l, { mode: 'download' }, 'The link now downloads the file.');
   else if (a === 'same') { S.q = l.key; $('#q').value = l.key; render(); }
-  else if (a === 'off') lkUpdate(l, { exp: nowS() }, 'Link turned off.');
   else if (a === 'del') deleteLinks([l], true);
   else if (a === 'more' && el) { const r = el.getBoundingClientRect(); linkMenu(l, r.left, r.bottom + 4); }
 }
@@ -1655,7 +1652,7 @@ function openNote(it) {
    which sits behind the normal Access login. Generate only fills the box;
    nothing is stored until Save. */
 const PW_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; // 62 characters
-const PW_OK = /^[a-zA-Z0-9]{7,24}$/; // generated ones are 7; typed ones may be up to 24
+const PW_OK = /^[\x21-\x7E]{7,24}$/; // same rule as validPassword() in src/upauth.js: visible ASCII, no spaces
 /* Same rule as generatePassword() in src/upauth.js: bytes at or above 248
    (the largest multiple of 62 that fits in a byte) are thrown away, so no
    character is more likely than any other. */
@@ -1705,7 +1702,7 @@ function renderUpAuth() {
       '<button class="btn" data-up="gen">' + ico('retry', 16) + 'Generate</button>' +
       '<button class="btn" data-up="copy">' + ico('copy', 16) + 'Copy</button>' +
     '</div>' +
-    '<small class="up-hint">7 to 24 characters: letters and numbers. Generate makes a 7-character one.</small>' +
+    '<small class="up-hint">7 to 24 characters: letters, numbers and symbols like !@#$%, no spaces. Generate makes a 7-character one.</small>' +
     '<div class="up-row">' +
       '<div class="up-txt"><b>Auto-rotate every 6 days</b><small>' + (on ? 'A new password is generated for you.' : 'The password never changes on its own.') + '</small></div>' +
       '<button class="sw' + (on ? ' on' : '') + '" role="switch" aria-checked="' + (on ? 'true' : 'false') + '" data-up="auto" aria-label="Auto-rotate every 6 days"><i></i></button>' +
@@ -1749,7 +1746,7 @@ $('#upBody').addEventListener('click', (e) => {
   if (a === 'auto') { saveUpAuth({ auto: U.auto === 'on' ? 'off' : 'on' }, U.auto === 'on' ? 'Auto-rotate off' : 'Auto-rotate on'); return; }
   if (a === 'save') {
     const v = ((U.draft === null ? U.password : U.draft) || '').trim();
-    if (!PW_OK.test(v)) { toast('The password must be 7 to 24 characters: letters and numbers only.', 'err'); return; }
+    if (!PW_OK.test(v)) { toast('The password must be 7 to 24 characters: letters, numbers and symbols, without spaces or accented letters.', 'err'); return; }
     if (v === U.password) { toast('That is already the password.', 'info'); return; }
     saveUpAuth({ password: v }, 'Password saved');
     return;

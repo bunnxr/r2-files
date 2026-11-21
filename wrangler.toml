@@ -30,8 +30,9 @@ custom_domain = true
 # Auto-rotation of the upload password: 04:00 UTC daily. The Worker only rotates
 # when auto-rotate is on and 6 days have passed, so a rotation can land up to
 # 24 hours after the 6-day mark.
+# Expired short links are deleted at :30 every hour (a slice of links per run).
 [triggers]
-crons = ["0 4 * * *"]
+crons = ["0 4 * * *", "30 * * * *"]
 
 # Worker logs, visible under the Worker's Observability tab
 [observability]

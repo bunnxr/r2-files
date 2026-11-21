@@ -7,7 +7,7 @@ import { verifyAccess } from "./access.js";
 import { uploadInit, uploadComplete, deleteFolderBatch, contentDisposition } from "./uploads.js";
 import { securityPolicy, notConfiguredPage } from "./pages.js";
 import { servePublic, shareUrl, proxyRead } from "./public.js";
-import { createLink, linkInfo, removeLink, listLinks, updateLink, deleteLink, addLink } from "./links.js";
+import { createLink, linkInfo, removeLink, listLinks, updateLink, deleteLink, addLink, sweepExpired } from "./links.js";
 import { readNotes, setNote, dropNotes } from "./notes.js";
 import * as ops from "./fileops.js";
 import { fetchToR2 } from "./urlfetch.js";
@@ -237,6 +237,10 @@ export default {
       const c = getConfig(env);
       const problems = configProblems(c);
       if (problems.length) { logEvent("cron.run", { decision: "skipped", reason: "not configured yet" }); return; }
+      if (event.cron === "30 * * * *") {
+        if (c.PUBLIC_HOST) { const r = await sweepExpired(c); if (r.deleted) logEvent("links.expired.deleted", r); }
+        return;
+      }
       await rotateIfDue(c);
     } catch (e) {
       console.error("[file-manager] cron", e && e.stack ? e.stack : e);

@@ -49,8 +49,8 @@ Each upload shows one line that redraws in place: a bar and percentage, bytes se
 
 The terminal client is protected by a password, separate from the Cloudflare Access login that guards the web app.
 
-- Manage it in the app: **Upload password** in the sidebar, or `#view=upload-password`.
-- Format: `a-z`, `A-Z` and `0-9`. **Generate** always makes 7 characters; a password typed in by hand may be 7 to 24 characters.
+- Manage it in the app: **Uploads** in the sidebar, or `#view=upload-password`.
+- Format: **Generate** always makes 7 characters of `a-z`, `A-Z` and `0-9`. A password typed in by hand may be 7 to 24 visible ASCII characters, symbols included (`!@#$%^&*` …), but no spaces and no accented letters or emoji, because it is sent in an HTTP header.
 - **Generate** fills the box with a new password; nothing changes until **Save** is clicked. **Copy** puts the value on the clipboard.
 - **Auto-rotate every 6 days** is off by default, so the password never changes on its own. Switched on, it saves immediately and a **Next rotation** date appears below the toggle.
 - It is stored as a small JSON object at `.system/upload-auth.json` **in the R2 bucket** — not in KV, not as a Worker secret and not in git. The Worker creates it the first time it is needed. `.system/` is hidden from the file manager and every move, copy, delete, trash, share and save route refuses keys under it.
@@ -112,5 +112,5 @@ Only the files in `public/` need to change; leave `src/` alone.
 - `style.css`: free to change (colours are CSS variables at the top; light theme only).
 - `index.html`: free to re-layout, but keep these element ids because `app.js` uses them: `logo file uploadIco btnFolder folderIco nav uBig uSub uSeg uTypes q searchIco searchBar crumbs folderSec folders filesTitle count sortBy sortDir btnView list drop uploads upTitle upSub upToggle upClear upBar upList modal toasts filesSec linksSec lkCount lkFilter lkClean lkRefresh lkList upSec upBody`.
 - `app.js`: the functions `itemHtml`, `folderHtml`, `theadHtml` and `render` build the file rows and cards. Class names and `data-*` attributes there (`data-act`, `data-i`, `data-f`, `data-sort`, `data-u`, `data-up`) are used by the click handlers, so keep them.
-- The **Upload password** sidebar item and the `#view=upload-password` route are part of the UI: the item comes from the `NAV` list and is drawn by `renderNav`, the panel is built by `renderUpAuth` into `#upBody`, and its styles are the `.upcard`, `.up-*` and `.sw` rules at the end of `style.css`. Keep them when restyling.
+- The **Uploads** sidebar item (the upload password page) and the `#view=upload-password` route are part of the UI: the item comes from the `NAV` list and is drawn by `renderNav`, the panel is built by `renderUpAuth` into `#upBody`, and its styles are the `.upcard`, `.up-*` and `.sw` rules at the end of `style.css`. Keep them when restyling.
 - Do not add external scripts or fonts: the Content-Security-Policy in `src/pages.js` blocks them.
