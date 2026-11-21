@@ -12,6 +12,7 @@ import { readNotes, setNote, dropNotes } from "./notes.js";
 import * as ops from "./fileops.js";
 import { fetchToR2 } from "./urlfetch.js";
 import { readAuth, saveAuth, rotateIfDue } from "./upauth.js";
+import { INTERNAL_HOST, handleInternal } from "./internal.js";
 import { PREFIX as CLI_PREFIX, serveScript, handleCli } from "./cli.js";
 
 // ---------------------------------------------------------------------
@@ -41,6 +42,8 @@ async function handle(request, env, ctx) {
   // The public hostname only ever serves files (public folders and signed share links): no UI, no API, no login
   if (isPublicHost) return servePublic(request, c, url);
   if (isLinkHost) return servePublic(request, c, url, { shortOnly: true }); // bunnxr.com: short links only, no public folders
+  // The shortener's "R2 files" folder, through its service binding (see src/internal.js)
+  if (host === INTERNAL_HOST) return handleInternal(request, c, url);
 
   // Terminal routes: protected by the upload password instead of Access
   // (Access has a bypass policy for /cli/*), so they run before verifyAccess.
