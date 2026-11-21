@@ -61,24 +61,27 @@ const P = {
 const ico = (n, s) => { const f = /Fill$/.test(n); return '<svg class="i" width="' + (s || 18) + '" height="' + (s || 18) + '" viewBox="0 0 24 24" fill="' + (f ? 'currentColor' : 'none') + '" stroke="' + (f ? 'none' : 'currentColor') + '" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + P[n] + '</svg>'; };
 const EXT = { image: 'jpg jpeg png gif webp avif svg bmp heic heif ico tif tiff', video: 'mp4 mov m4v webm mkv avi wmv', audio: 'mp3 wav flac aac m4a ogg opus', pdf: 'pdf', archive: 'zip rar 7z tar gz tgz bz2 xz', code: 'js ts jsx tsx json html css py rb go rs java c cpp h php sh sql yml yaml xml md', sheet: 'xls xlsx csv tsv ods numbers', doc: 'doc docx odt rtf txt pages ppt pptx key' };
 const KC = { folder: '#4aa99c', image: '#12a07a', video: '#d9467f', audio: '#7c5cd6', pdf: '#e04f4f', archive: '#d4951c', code: '#1f8fc7', sheet: '#2b9a5c', doc: '#3d7be0', file: '#9aa09a' };
-// Minimal file icons: a thin page outline (neutral) with a small type mark inside (type colour)
-const PAGE = '<path class="pg" d="M14 3H7.5A2.5 2.5 0 0 0 5 5.5v13A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V8z"/><path class="pg" d="M14 3v3.5A1.5 1.5 0 0 0 15.5 8H19"/>';
+// File and folder icons: one dark ink, medium line, rounded corners and small solid details.
+// Every file is the same page outline with a symbol for its type; class "f" parts are solid.
+const PAGE = '<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14.5 3v4.5H19"/>';
 const MARK = {
-  image: '<circle cx="10" cy="12" r="1.1"/><path d="m8.5 18 2.8-3.2 1.9 1.9 1.4-1.4 1.9 2.7"/>',
-  video: '<path d="M10.5 12.2v4.6l3.9-2.3z"/>',
-  audio: '<circle cx="10.2" cy="16.6" r="1.4"/><path d="M11.6 16.6V11.5l3.4-.9v4.7"/><circle cx="13.6" cy="15.4" r="1.4"/>',
-  pdf: '<path d="M8.5 12.5h7M8.5 15h7M8.5 17.5h4"/>',
-  doc: '<path d="M8.5 12.5h7M8.5 15h7M8.5 17.5h4"/>',
-  archive: '<path d="M12 9.5v1.2M12 12v1.2M11 14.6h2v2.6h-2z"/>',
-  code: '<path d="m10.2 12.6-1.9 2 1.9 2M13.8 12.6l1.9 2-1.9 2"/>',
-  sheet: '<path d="M8.5 12h7v5.8h-7zM8.5 14.9h7M12 12v5.8"/>',
-  file: '',
+  image: '<circle class="f" cx="9.6" cy="11.6" r="1.25"/><path class="f" d="M7.8 18 10.6 14.4l1.9 2.2 1.5-1.7 2.2 3.1z"/>',
+  video: '<path class="f" d="M10 11.2v6.2a.6.6 0 0 0 .9.5l4.9-3.1a.6.6 0 0 0 0-1l-4.9-3.1a.6.6 0 0 0-.9.5z"/>',
+  audio: '<circle class="f" cx="10" cy="16.6" r="1.6"/><path d="M11.6 16.6v-5.8l3.6-1v2"/>',
+  pdf: '<rect class="f" x="7.5" y="12.6" width="9" height="4.8" rx="1.2"/><path d="M8.5 9.8h3.5"/>',
+  doc: '<path d="M8.5 11.5h7M8.5 14.5h7M8.5 17.5h4"/>',
+  archive: '<path class="f" d="M10.7 3.8h1.5v1.5h-1.5zM12.2 5.3h1.5v1.5h-1.5zM10.7 6.8h1.5v1.5h-1.5zM12.2 8.3h1.5v1.5h-1.5z"/><rect x="10.4" y="11" width="3.2" height="4.4" rx="1"/><path d="M12 13.4v.4"/>',
+  code: '<path d="m10 12-2.2 2.4 2.2 2.4M14 12l2.2 2.4-2.2 2.4"/>',
+  sheet: '<rect x="7.8" y="11" width="8.4" height="7" rx="1.2"/><path d="M7.8 14.5h8.4M12 11v7"/>',
+  file: '<circle class="f" cx="9.4" cy="14.6" r="1"/><circle class="f" cx="12" cy="14.6" r="1"/><circle class="f" cx="14.6" cy="14.6" r="1"/>',
 };
-const fileIcon = (k, s) => '<svg class="i" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + PAGE + '<g class="mk">' + (MARK[k] || '') + '</g></svg>';
+const FOLDER = '<path d="M3.5 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6l1.4 1.4h6.6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 10h17"/><rect class="f" x="6" y="12.6" width="4" height="1.8" rx=".9"/>';
+const inkIcon = (body, s) => '<svg class="i ink" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + body + '</svg>';
+const fileIcon = (k, s) => inkIcon(PAGE + (MARK[k] || MARK.file), s);
+const tile = (k, s) => '<span class="tile' + (k === 'folder' ? ' fold' : '') + '">' + inkIcon(k === 'folder' ? FOLDER : PAGE + (MARK[k] || MARK.file), Math.round((s || 22) * 1.35)) + '</span>';
 const GLYPH = { folder: 'folder', image: 'image', video: 'video', audio: 'audio', pdf: 'doc', archive: 'archive', code: 'code', sheet: 'sheet', doc: 'doc', file: 'file' };
 const PREV = { image: 1, video: 1, audio: 1, pdf: 1 };
 const kindOf = (name) => { const e = name.indexOf('.') < 0 ? '' : name.split('.').pop().toLowerCase(); for (const k in EXT) if ((' ' + EXT[k] + ' ').indexOf(' ' + e + ' ') >= 0 && e) return k; return 'file'; };
-const tile = (k, s) => (k === 'folder' ? '<span class="tile fold" style="--c:' + KC[k] + '">' + ico('folderFill', Math.round((s || 22) * 1.45)) + '</span>' : '<span class="tile" style="--c:' + (KC[k] || KC.file) + '">' + fileIcon(k, Math.round((s || 22) * 1.4)) + '</span>');
 
 /* ---------- state ---------- */
 const S = { notes: {}, selMode: false, sel: new Set(), prefix: '', folders: [], files: [], shown: [], loading: true, error: '', q: '', by: 'name', dir: 1, view: ls.get('fm-view') || BOOT.view, seq: 0 };

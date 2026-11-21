@@ -333,10 +333,9 @@ body{background:var(--bg)}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* ---- flatter icons, New button, usage card, menus ---- */
-.tile{background:transparent;color:var(--c,#9aa09a);border-radius:0}
-.tile .pg{stroke:#a7aba5}
-.tile .mk{stroke:var(--c,#9aa09a)}
-.tile.fold{background:transparent;color:var(--c)}
+.tile{background:transparent;color:#262a28;border-radius:0}
+.tile.fold{background:transparent;color:#262a28}
+.ink .f{fill:currentColor;stroke:none}
 .tile.sk{background:var(--hover);border-radius:10px}
 .newbtn{height:46px;border-radius:12px;font-size:15px;box-shadow:0 6px 16px -8px var(--accent)}
 .navcard .nav{margin-top:14px}
