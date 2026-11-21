@@ -17,6 +17,8 @@ let V = null; // the open preview / gallery, if any
 /* ---------- icons ---------- */
 const P = {
   cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+  // Logo "orb": a shaded teal sphere (dark body, mid tone, light) with a small moon. Own colours, no tile.
+  logoFill: '<circle cx="11" cy="13" r="8.5" fill="#0f766e"/><circle cx="9.4" cy="11.2" r="6.4" fill="#1f9686"/><circle cx="8.2" cy="9.8" r="3.6" fill="#45b8a7"/><circle cx="19.6" cy="4.6" r="2.1" fill="#2fa594"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   folderPlus: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M9 13h6"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
@@ -136,7 +138,7 @@ function askFolder() {
 /* ---------- view ---------- */
 function applyView() { $('#list').dataset.view = S.view; $('#btnView').innerHTML = ico(S.view === 'grid' ? 'list' : 'grid', 19); }
 $('#btnView').onclick = () => { S.view = S.view === 'grid' ? 'list' : 'grid'; ls.set('fm-view', S.view); applyView(); };
-$('#logo').innerHTML = ico('cloud', 21);
+$('#logo').innerHTML = ico('logoFill', 32);
 $('#searchIco').innerHTML = ico('search', 17);
 $('#upToggle').innerHTML = ico('down', 18);
 $('#upClear').innerHTML = ico('broom', 17);
