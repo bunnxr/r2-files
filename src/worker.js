@@ -57,7 +57,7 @@ async function handle(request, env, ctx) {
     if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
     if (url.pathname === "/manifest.webmanifest") {
       const icon = (src, sizes, extra) => Object.assign({ src, sizes, type: "image/png" }, extra);
-      return new Response(JSON.stringify({ name: c.SITE_TITLE, short_name: c.SITE_TITLE.slice(0, 12), start_url: "/", scope: "/", display: "standalone", background_color: "#f4f6fb", theme_color: safeColor(c.ACCENT, "#0d6efd"), icons: [icon("/icon-192.png", "192x192"), icon("/icon-512.png", "512x512"), icon("/icon-maskable-512.png", "512x512", { purpose: "maskable" })] }), { headers: { "content-type": "application/manifest+json", "cache-control": "no-store" } });
+      return new Response(JSON.stringify({ name: c.SITE_TITLE, short_name: c.SITE_TITLE.slice(0, 12), start_url: "/", scope: "/", display: "standalone", background_color: "#faf8f4", theme_color: safeColor(c.ACCENT, "#0f766e"), icons: [icon("/icon-192.png", "192x192"), icon("/icon-512.png", "512x512"), icon("/icon-maskable-512.png", "512x512", { purpose: "maskable" })] }), { headers: { "content-type": "application/manifest+json", "cache-control": "no-store" } });
     }
     if (!env.ASSETS) return new Response("Static assets binding missing. Check the [assets] section in wrangler.toml.", { status: 500 });
     const res = await env.ASSETS.fetch(request);
@@ -82,7 +82,7 @@ async function handle(request, env, ctx) {
       return json({ prefix, folders: r.folders.filter((f) => f !== ".trash/" && !isInternal(f)), files: r.files.filter((f) => f.key !== prefix && !isInternal(f.key)), truncated: r.truncated });
     }
     case "GET /api/config":
-      return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0d6efd"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW, publicHost: c.PUBLIC_HOST, linkHost: c.LINK_HOST || c.PUBLIC_HOST, publicFolders: c.PUBLIC_FOLDER_LIST, trashDays: c.TRASH_DAYS });
+      return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0f766e"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW, publicHost: c.PUBLIC_HOST, linkHost: c.LINK_HOST || c.PUBLIC_HOST, publicFolders: c.PUBLIC_FOLDER_LIST, trashDays: c.TRASH_DAYS });
     case "GET /api/usage": {
       const u = await bucketUsage(c);
       return json({ used: u.used, count: u.count, partial: u.partial, byType: u.byType });

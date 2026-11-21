@@ -60,7 +60,7 @@ const P = {
 };
 const ico = (n, s) => { const f = /Fill$/.test(n); return '<svg class="i" width="' + (s || 18) + '" height="' + (s || 18) + '" viewBox="0 0 24 24" fill="' + (f ? 'currentColor' : 'none') + '" stroke="' + (f ? 'none' : 'currentColor') + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + P[n] + '</svg>'; };
 const EXT = { image: 'jpg jpeg png gif webp avif svg bmp heic heif ico tif tiff', video: 'mp4 mov m4v webm mkv avi wmv', audio: 'mp3 wav flac aac m4a ogg opus', pdf: 'pdf', archive: 'zip rar 7z tar gz tgz bz2 xz', code: 'js ts jsx tsx json html css py rb go rs java c cpp h php sh sql yml yaml xml md', sheet: 'xls xlsx csv tsv ods numbers', doc: 'doc docx odt rtf txt pages ppt pptx key' };
-const KC = { folder: '#4c9aff', image: '#10b981', video: '#ec4899', audio: '#8b5cf6', pdf: '#ef4444', archive: '#f59e0b', code: '#0ea5e9', sheet: '#22a06b', doc: '#3b82f6', file: '#94a3b8' };
+const KC = { folder: '#2a9d8f', image: '#10b981', video: '#ec4899', audio: '#8b5cf6', pdf: '#ef4444', archive: '#f59e0b', code: '#0ea5e9', sheet: '#22a06b', doc: '#3b82f6', file: '#94a3b8' };
 const GLYPH = { folder: 'folder', image: 'image', video: 'video', audio: 'audio', pdf: 'doc', archive: 'archive', code: 'code', sheet: 'sheet', doc: 'doc', file: 'file' };
 const PREV = { image: 1, video: 1, audio: 1, pdf: 1 };
 const kindOf = (name) => { const e = name.indexOf('.') < 0 ? '' : name.split('.').pop().toLowerCase(); for (const k in EXT) if ((' ' + EXT[k] + ' ').indexOf(' ' + e + ' ') >= 0 && e) return k; return 'file'; };
