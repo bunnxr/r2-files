@@ -426,3 +426,8 @@ body.selmode #list .sel{display:block}
  .lk-tools{flex-wrap:wrap}
  .lk-tools select{flex:1}
 }
+.sh-more{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:14px}
+.sh-more .link{display:inline-flex;align-items:center;gap:6px;font-size:13.5px}
+.lk-addr{display:flex;align-items:center;gap:6px}
+.lk-addr span{color:var(--muted);font-size:13.5px;white-space:nowrap}
+.lk-addr .field{margin:0;flex:1;min-width:0}

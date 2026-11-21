@@ -41,26 +41,31 @@ export async function linkInfo(c, key) {
   return { exists: true, active: alive(n), name: k.name, url: urlFor(c, k.name), exp: n.exp || 0 };
 }
 
+// First unused address based on the file name: charlie.zip, then charlie-2.zip, charlie-3.zip …
+// Existing links (even expired ones) are never taken over: each one is a separate link now.
+async function freeName(c, key) {
+  const base = sanitizeName(key.split("/").pop()).replace(/\s+/g, "-");
+  const dot = base.lastIndexOf("."), stem = dot > 0 ? base.slice(0, dot) : base, ext = dot > 0 ? base.slice(dot) : "";
+  for (let i = 1; i <= 30; i++) { // 30 keeps us under the Free plan's 50-subrequest cap
+    const cand = i === 1 ? base : stem + "-" + i + ext;
+    if (!(await read(c, nameObj(cand)))) return cand;
+  }
+  throw new HttpError(409, "Too many links use this file name. Pick a custom address instead.");
+}
+
+// The main link is the one the Share dialog shows and re-uses. Creating a link never touches the
+// others, so a file can have any number of links, each with its own address and validity.
 export async function createLink(c, key, seconds) {
   if (!c.PUBLIC_HOST) throw new HttpError(400, "Set PUBLIC_HOST in the config to create short links.");
   const exp = seconds > 0 ? Math.floor(Date.now() / 1000) + seconds : 0;
   const ko = await keyObj(key);
   let name = null;
   const prev = await read(c, ko);
-  if (prev && prev.name) { // keep the same URL for this file whenever it is still ours
+  if (prev && prev.name) { // keep the same URL for this file's main link whenever it is still ours
     const n = await lookupLink(c, prev.name);
-    if (!n || n.key === key || !alive(n)) name = prev.name;
+    if (!n || n.key === key) name = prev.name;
   }
-  if (!name) {
-    const base = sanitizeName(key.split("/").pop()).replace(/\s+/g, "-");
-    const dot = base.lastIndexOf("."), stem = dot > 0 ? base.slice(0, dot) : base, ext = dot > 0 ? base.slice(dot) : "";
-    for (let i = 1; i <= 20 && !name; i++) { // charlie.zip, then charlie-2.zip if another file already uses that name
-      const cand = i === 1 ? base : stem + "-" + i + ext;
-      const n = await lookupLink(c, cand);
-      if (!n || n.key === key || !alive(n)) name = cand;
-    }
-    if (!name) throw new HttpError(409, "Too many links use this file name. Rename the file first.");
-  }
+  if (!name) name = await freeName(c, key);
   const rec = { key, exp, t: Math.floor(Date.now() / 1000) };
   await write(c, nameObj(name), rec);
   await write(c, ko, Object.assign({ name }, rec));
@@ -137,14 +142,34 @@ export async function updateLink(c, b) {
 
   await write(c, nameObj(newName), out);
   if (newName !== name) await drop(c, nameObj(name));
-  // keep the per-file pointer (used by the Share dialog) in step
-  const oldKo = await keyObj(rec.key);
-  if (out.key !== rec.key) {
-    const k = await read(c, oldKo);
-    if (k && k.name === name) await drop(c, oldKo);
+  // A renamed or re-pointed link stops being its file's main link, so the next "Share link"
+  // makes a fresh link for that file instead of changing this one.
+  if (newName !== name || out.key !== rec.key) {
+    const ko = await keyObj(rec.key);
+    const k = await read(c, ko);
+    if (k && k.name === name) await drop(c, ko);
   }
-  await write(c, await keyObj(out.key), Object.assign({ name: newName }, out));
   return { name: newName, url: urlFor(c, newName), key: out.key, exp: out.exp, t: out.t, active: alive(out) };
+}
+
+// An extra, separate link for a file. name "" = pick one from the file name.
+export async function addLink(c, b) {
+  if (!c.PUBLIC_HOST) throw new HttpError(400, "Set PUBLIC_HOST in the config to create short links.");
+  const key = String(b.key ?? "");
+  if (!goodTarget(key)) throw new HttpError(400, "Invalid file.");
+  const now = Math.floor(Date.now() / 1000);
+  const exp = Math.floor(Number(b.exp) || 0);
+  if (exp < 0 || (exp && exp <= now) || exp > now + MAX_DAYS * 86400) throw new HttpError(400, "Pick an expiry within " + MAX_DAYS + " days, or never.");
+  const h = await r2(c, "HEAD", key);
+  if (h.status === 404) throw new HttpError(404, "That file does not exist.");
+  let name;
+  if (String(b.name ?? "").trim()) {
+    name = cleanName(b.name);
+    if (await read(c, nameObj(name))) throw new HttpError(409, "Another link already uses “" + name + "”. Delete it first or pick another address.");
+  } else name = await freeName(c, key);
+  const rec = { key, exp, t: now };
+  await write(c, nameObj(name), rec);
+  return { name, url: urlFor(c, name), key, exp, t: now, active: true, missing: false, size: Number(h.headers.get("content-length")) || 0 };
 }
 
 export async function deleteLink(c, name) {

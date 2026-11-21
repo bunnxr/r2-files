@@ -7,7 +7,7 @@ import { verifyAccess } from "./access.js";
 import { uploadInit, uploadComplete, deleteFolderBatch, contentDisposition } from "./uploads.js";
 import { securityPolicy, notConfiguredPage } from "./pages.js";
 import { servePublic, shareUrl, proxyRead } from "./public.js";
-import { createLink, linkInfo, removeLink, listLinks, updateLink, deleteLink } from "./links.js";
+import { createLink, linkInfo, removeLink, listLinks, updateLink, deleteLink, addLink } from "./links.js";
 import { readNotes, setNote, dropNotes } from "./notes.js";
 import * as ops from "./fileops.js";
 import { fetchToR2 } from "./urlfetch.js";
@@ -153,6 +153,8 @@ async function handle(request, env, ctx) {
       return json(c.PUBLIC_HOST ? await listLinks(c, url.searchParams.get("after") || "") : { links: [], next: "", off: true });
     case "POST /api/link-update":
       return json(await updateLink(c, await readJson(request)));
+    case "POST /api/link-add":
+      return json(await addLink(c, await readJson(request)));
     case "POST /api/link-delete":
       return json(await deleteLink(c, (await readJson(request)).name));
     case "GET /api/notes":

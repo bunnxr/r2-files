@@ -147,7 +147,7 @@ function setSort(by, dir) {
 }
 function applyRoute() {
   const r = readRoute();
-  S.kind = r.kind; S.prefix = r.prefix; S.q = ''; $('#q').value = ''; setSelMode(false);
+  S.kind = r.kind; S.prefix = r.prefix; S.q = (S.kind === 'links' && L.nextQ) || ''; L.nextQ = ''; $('#q').value = S.q; setSelMode(false);
   if (S.kind) setSort('date', -1); else setSort('name', 1);
   load();
 }
@@ -882,6 +882,7 @@ async function openShare(it) {
     '<span class="lbl2">' + (host ? 'Short link' : 'Expiring link') + '</span><div class="seg4"><button class="btn" data-s="3600">1 hour</button><button class="btn" data-s="86400">1 day</button><button class="btn" data-s="604800">7 days</button>' + (host ? '<button class="btn" data-s="0">Never expires</button>' : '') + '</div>' +
     '<div class="copyrow" id="shRow" hidden><input id="shLink" class="field" readonly><button class="btn" data-c="1">Copy</button></div>' +
     '<small class="hint" id="shNote">' + (host ? 'The address stays the same whatever you pick; only how long it works changes.' : 'Pick how long the link should work. It is copied for you.') + '</small>' +
+    (host ? '<div class="sh-more"><button type="button" class="link" data-new="1">' + ico('plus', 15) + ' New separate link…</button><button type="button" class="link" data-all="1">' + ico('link', 15) + ' All links of this file</button></div>' : '') +
     '<div class="dlg-acts"><button class="btn danger" id="shRemove" data-rm="1" hidden>Remove link</button><button class="btn" data-x="no">Close</button></div></div>');
   const note = (t) => { const n = $('#shNote'); if (n) n.textContent = t; };
   const when = (exp) => (exp ? 'Works until ' + new Date(exp * 1000).toLocaleString() + '.' : 'Never expires.');
@@ -889,6 +890,8 @@ async function openShare(it) {
   if (host) api('/api/link-info', { key: it.key }).then((i) => { if (i.exists && $('#shRow')) { show(i.url, i.active ? 'Current link. ' + when(i.exp) : 'This link has expired. Pick a length to turn it on again.', false); if (i.active) $('#shRemove').hidden = false; } }).catch(() => {});
   modalEl.onclick = async (e) => {
     if (e.target.closest('[data-x]')) { closeModal(); return; }
+    if (e.target.closest('[data-new]')) { newLinkDlg(it.key); return; }
+    if (e.target.closest('[data-all]')) { closeModal(); manageLinksFor(it.key); return; }
     if (e.target.closest('[data-c]')) { const ok = await copyText($('#shLink').value); toast(ok ? 'Copied' : 'Press and hold the link to copy it', ok ? 'ok' : 'info'); return; }
     if (e.target.closest('[data-rm]')) { try { await api('/api/link-remove', { key: it.key }); $('#shRow').hidden = true; $('#shRemove').hidden = true; note('Link removed. It no longer works.'); } catch (err) { toast(err.message, 'err'); } return; }
     const b = e.target.closest('[data-s]');
@@ -1004,8 +1007,39 @@ function openValidity(l) {
     if (await lkUpdate(l, { exp }, v === 'off' ? 'Link turned off.' : 'Validity updated.')) closeModal();
   };
 }
+// Extra link for a file, separate from its other links (own address, own validity)
+function newLinkDlg(key) {
+  const fname = key.split('/').pop();
+  const opts = [[3600, '1 hour'], [86400, '1 day'], [604800, '7 days'], [2592000, '30 days'], [7776000, '90 days'], [0, 'Never']];
+  openModal('<form class="dlg" role="dialog" aria-modal="true"><h2>New link for “' + esc(fname) + '”</h2><p>A separate link with its own address and validity. The file’s other links are not changed.</p>' +
+    '<span class="lbl2">Address</span><div class="lk-addr"><span>' + esc(BOOT.publicHost) + '/</span><input id="nlName" class="field" maxlength="180" placeholder="Leave empty to use the file name" autocomplete="off"></div>' +
+    '<span class="lbl2">Works for</span><div class="seg3">' + opts.map((o) => '<button type="button" class="btn" data-v="' + o[0] + '">' + o[1] + '</button>').join('') + '</div>' +
+    '<div class="copyrow" id="nlRow" hidden><input id="nlLink" class="field" readonly><button type="button" class="btn" data-c="1">Copy</button></div>' +
+    '<small class="hint" id="nlNote">Pick how long it should work to create it. It is copied for you.</small>' +
+    '<div class="dlg-acts"><button type="button" class="btn" data-x="no">Close</button></div></form>');
+  $('#nlName').focus();
+  $('form', modalEl).onsubmit = (e) => e.preventDefault();
+  let busy = false;
+  modalEl.onclick = async (e) => {
+    if (e.target.closest('[data-x]')) { closeModal(); return; }
+    if (e.target.closest('[data-c]')) { const ok = await copyText($('#nlLink').value); toast(ok ? 'Copied' : 'Press and hold the link to copy it', ok ? 'ok' : 'info'); return; }
+    const b = e.target.closest('[data-v]'); if (!b || busy) return;
+    busy = true;
+    try {
+      const s = +b.dataset.v;
+      const r = await api('/api/link-add', { key, name: $('#nlName').value.trim(), exp: s ? nowS() + s : 0 });
+      if (L.list.length) { L.list.push(r); L.activeCount++; render(); }
+      if (!$('#nlRow')) return;
+      $('#nlRow').hidden = false; $('#nlLink').value = r.url; $('#nlName').value = '';
+      const ok = await copyText(r.url);
+      $('#nlNote').textContent = (ok ? 'Copied. ' : '') + (r.exp ? 'Works until ' + fwhen(r.exp) + '.' : 'Never expires.') + ' Pick again to make one more.';
+    } catch (err) { toast(err.message, 'err'); }
+    busy = false;
+  };
+}
+function manageLinksFor(key) { L.nextQ = key; if (S.kind === 'links') applyRoute(); else location.hash = 'view=links'; }
 async function renameLink(l) {
-  const v = await askName('Change link address', 'The old address stops working. Only the part after ' + BOOT.publicHost + '/ changes.', l.name, 'Save');
+  const v = await askName('Change link address', 'The old address stops working. This becomes a separate custom link, so “Share link” on the file will make a new link next time.', l.name, 'Save');
   if (!v || v === l.name) return;
   const old = l.name;
   if (await lkUpdate(l, { newName: v }, 'Link address changed.')) { const u = l.url; if (l.name !== old) copyText(u).then((ok) => ok && toast('New link copied', 'ok')); }
@@ -1058,7 +1092,8 @@ function showLinkFile(l) { if (!l.key) return; const i = l.key.lastIndexOf('/');
 async function linkMenu(l, x, y) {
   const st = lkState(l);
   const rows = [['copy', 'copy', 'Copy link'], ['open', 'ext', 'Open link'], '-', ['valid', 'clock', 'Change validity…'], ['rename', 'edit', 'Change link address…'], ['target', 'move', 'Point to another file…']];
-  if (st !== 'broken') rows.push(['goto', 'folder', 'Show file in folder']);
+  if (st !== 'broken') rows.push(['newfor', 'plus', 'New link for this file…'], ['goto', 'folder', 'Show file in folder']);
+  if (l.key) rows.push(['same', 'search', 'All links of this file']);
   if (st === 'active') rows.push('-', ['off', 'x', 'Turn off now']);
   rows.push('-', ['del', 'trash', 'Delete link', true]);
   const a = await showMenu(l.url.replace(/^https?:\/\//, ''), rows, x, y);
@@ -1071,6 +1106,8 @@ function linkAct(a, l, el) {
   else if (a === 'rename') renameLink(l);
   else if (a === 'target') retargetLink(l);
   else if (a === 'goto') showLinkFile(l);
+  else if (a === 'newfor') newLinkDlg(l.key);
+  else if (a === 'same') { S.q = l.key; $('#q').value = l.key; render(); }
   else if (a === 'off') lkUpdate(l, { exp: nowS() }, 'Link turned off.');
   else if (a === 'del') deleteLinks([l], true);
   else if (a === 'more' && el) { const r = el.getBoundingClientRect(); linkMenu(l, r.left, r.bottom + 4); }
