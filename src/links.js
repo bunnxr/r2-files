@@ -5,7 +5,7 @@
 //   .links/k/<hash>   file  -> { name, key, exp } (used to show the current link of a file)
 // exp is a unix time in seconds, or 0 for a link that never expires.
 import { HttpError, validKey, sanitizeName } from "./util.js";
-import { r2, r2Error } from "./r2.js";
+import { r2, r2Error, parseList } from "./r2.js";
 
 const enc = new TextEncoder();
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -72,5 +72,89 @@ export async function removeLink(c, key) {
   const k = await read(c, ko);
   if (k && k.name) { const n = await lookupLink(c, k.name); if (n && n.key === key) await drop(c, nameObj(k.name)); }
   await drop(c, ko);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------
+//  Links page: list every short link, change its expiry, address or file, delete it.
+// ---------------------------------------------------------------------
+const MAX_DAYS = 365;
+const cleanName = (raw) => {
+  const n = sanitizeName(String(raw ?? "").trim()).replace(/\s+/g, "-");
+  if (!validKey(nameObj(n), "file") || n.length > 180) throw new HttpError(400, "That link name is not allowed.");
+  return n;
+};
+const goodTarget = (k) => validKey(k, "file") && !k.startsWith(".trash/") && !k.startsWith(".links/") && !k.startsWith(".notes/");
+
+// One page of links. 1 list + 2 calls per link keeps a page under the Free plan's 50-subrequest cap.
+export async function listLinks(c, after) {
+  const query = { "list-type": "2", "max-keys": "20", prefix: ".links/n/" };
+  if (after) query["start-after"] = nameObj(after);
+  const res = await r2(c, "GET", "", { query });
+  if (!res.ok) throw new HttpError(502, r2Error(res));
+  const p = parseList(res.text);
+  const keys = p.files.map((f) => f.key);
+  const links = await Promise.all(keys.map(async (obj) => {
+    const name = obj.slice(nameObj("").length);
+    const rec = await read(c, obj).catch(() => null);
+    if (!rec || typeof rec.key !== "string") return { name, url: urlFor(c, name), key: "", exp: 0, t: 0, active: false, missing: true, size: 0 };
+    const h = await r2(c, "HEAD", rec.key).catch(() => null);
+    const missing = !h || h.status === 404;
+    const size = h && h.ok ? Number(h.headers.get("content-length")) || 0 : 0;
+    return { name, url: urlFor(c, name), key: rec.key, exp: rec.exp || 0, t: rec.t || 0, active: alive(rec), missing, size };
+  }));
+  return { links, next: p.truncated && keys.length ? keys[keys.length - 1].slice(nameObj("").length) : "" };
+}
+
+// b: { name, exp?, newName?, key? }   exp: unix seconds, 0 = never
+export async function updateLink(c, b) {
+  const name = String(b.name ?? "");
+  if (!validKey(nameObj(name), "file")) throw new HttpError(400, "Invalid link.");
+  const rec = await read(c, nameObj(name));
+  if (!rec || typeof rec.key !== "string") throw new HttpError(404, "This link no longer exists.");
+  const now = Math.floor(Date.now() / 1000);
+  const out = { key: rec.key, exp: rec.exp || 0, t: rec.t || now };
+
+  if (b.exp !== undefined) {
+    const exp = Math.floor(Number(b.exp));
+    if (!Number.isFinite(exp) || exp < 0 || exp > now + MAX_DAYS * 86400) throw new HttpError(400, "Pick an expiry within " + MAX_DAYS + " days, or never.");
+    out.exp = exp;
+  }
+  if (b.key !== undefined && b.key !== rec.key) {
+    if (!goodTarget(b.key)) throw new HttpError(400, "Invalid file.");
+    const h = await r2(c, "HEAD", b.key);
+    if (h.status === 404) throw new HttpError(404, "That file does not exist.");
+    out.key = b.key;
+  }
+  let newName = name;
+  if (b.newName !== undefined && b.newName !== name) {
+    newName = cleanName(b.newName);
+    if (newName !== name) {
+      const other = await read(c, nameObj(newName));
+      if (other && alive(other)) throw new HttpError(409, "Another link already uses “" + newName + "”.");
+    }
+  }
+
+  await write(c, nameObj(newName), out);
+  if (newName !== name) await drop(c, nameObj(name));
+  // keep the per-file pointer (used by the Share dialog) in step
+  const oldKo = await keyObj(rec.key);
+  if (out.key !== rec.key) {
+    const k = await read(c, oldKo);
+    if (k && k.name === name) await drop(c, oldKo);
+  }
+  await write(c, await keyObj(out.key), Object.assign({ name: newName }, out));
+  return { name: newName, url: urlFor(c, newName), key: out.key, exp: out.exp, t: out.t, active: alive(out) };
+}
+
+export async function deleteLink(c, name) {
+  if (!validKey(nameObj(String(name ?? "")), "file")) throw new HttpError(400, "Invalid link.");
+  const rec = await read(c, nameObj(name));
+  await drop(c, nameObj(name));
+  if (rec && typeof rec.key === "string") {
+    const ko = await keyObj(rec.key);
+    const k = await read(c, ko);
+    if (k && k.name === name) await drop(c, ko);
+  }
   return { ok: true };
 }

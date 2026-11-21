@@ -39,7 +39,19 @@
       <div class="sec-h"><h2>Folders</h2></div>
       <div id="folders" class="folders"></div>
     </section>
-    <section>
+    <section id="linksSec" hidden>
+      <div class="sec-h">
+        <h2>Links</h2>
+        <div class="tools lk-tools">
+          <span id="lkCount"></span>
+          <select id="lkFilter" aria-label="Show"><option value="all">All links</option><option value="active">Active</option><option value="expired">Expired</option><option value="broken">File missing</option></select>
+          <button id="lkClean" class="btn lk-wide" hidden>Clean up</button>
+          <button id="lkRefresh" class="btn" title="Refresh" aria-label="Refresh"></button>
+        </div>
+      </div>
+      <div id="lkList" class="lk-list"></div>
+    </section>
+    <section id="filesSec">
       <div class="sec-h">
         <h2 id="filesTitle">Files</h2>
         <div class="tools">

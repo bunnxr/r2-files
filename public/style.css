@@ -386,3 +386,43 @@ body.selmode #list .sel{display:block}
 #btnSelect{width:auto;padding:0 12px;gap:6px}
 #btnSelect.on{background:var(--accent);color:#fff}
 #selbar{align-items:center}
+
+/* ---- Links page ---- */
+.lk-tools .btn.lk-wide{width:auto;padding:0 12px}
+.lk-list{display:flex;flex-direction:column;gap:6px}
+.lk-row{display:grid;grid-template-columns:auto minmax(0,1fr) 190px auto;align-items:center;gap:14px;padding:10px 14px;border-radius:12px;background:var(--fill);cursor:pointer}
+.lk-row:hover{background:#ebf0f6}
+.lk-main{min-width:0}
+.lk-top{display:flex;align-items:center;gap:4px;min-width:0}
+.lk-url{font-weight:600;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lk-url:hover{text-decoration:underline}
+.lk-top .ib{width:28px;height:28px;flex:none}
+.lk-file{display:block;color:var(--muted);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lk-file a{cursor:pointer}
+.lk-file a:hover{color:var(--text);text-decoration:underline}
+.lk-val{display:flex;flex-direction:column;align-items:flex-start;gap:2px;line-height:1.3}
+.lk-val small{color:var(--text);font-size:12.5px}
+.lk-val small.lk-exact{color:var(--muted);font-size:11.5px}
+.pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:11.5px;font-weight:700}
+.pill.active{background:#dcfce7;color:#15803d}
+.pill.expired{background:#eef1f5;color:#637381}
+.pill.broken{background:#fde8e7;color:var(--danger)}
+.lk-row.expired .tile,.lk-row.broken .tile{opacity:.5}
+.lk-row.expired .lk-url{color:var(--muted)}
+.lk-acts{display:flex;align-items:center;gap:4px}
+.lk-acts .btn{height:34px;padding:0 12px;gap:6px;background:#fff}
+.lk-acts .btn:hover{background:#e3edff}
+.lk-dlgurl{font-weight:600;color:var(--accent);overflow-wrap:anywhere}
+.lk-cur{padding:10px 12px;border-radius:10px;background:var(--fill);font-size:13.5px}
+.seg3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.pk-row .pk-sz{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
+.pk-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:759px){
+ .lk-row{grid-template-columns:auto minmax(0,1fr) auto;gap:10px;padding:10px 12px}
+ .lk-val{grid-column:2/4;grid-row:2;flex-direction:row;align-items:center;gap:8px;flex-wrap:wrap}
+ .lk-val .lk-exact{display:none}
+ .lk-acts .btn span{display:none}
+ .lk-acts .btn{width:34px;padding:0}
+ .lk-tools{flex-wrap:wrap}
+ .lk-tools select{flex:1}
+}

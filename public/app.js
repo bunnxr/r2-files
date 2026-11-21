@@ -124,11 +124,12 @@ $('#upToggle').innerHTML = ico('down', 18);
 $('#upClear').innerHTML = ico('broom', 17);
 
 /* ---------- browsing ---------- */
-const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other', 'trash'];
-const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash' };
+const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other', 'trash', 'links'];
+const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash', links: 'Links' };
 const CAT = { image: ['Images', '#3b82f6', 'image'], video: ['Videos', '#ef4444', 'video'], audio: ['Audio', '#8b5cf6', 'audio'], doc: ['Documents', '#22a06b', 'doc'], archive: ['Archives', '#f59e0b', 'archive'], other: ['Other', '#64748b', 'file'], trash: ['Trash', '#94a3b8', 'trash'] };
-const NAV = [['', 'Files', 'folder'], ['trash', 'Trash', 'trash']];
+const NAV = [['', 'Files', 'folder'], ['links', 'Links', 'link'], ['trash', 'Trash', 'trash']];
 S.kind = ''; S.usage = null; S.total = 0; S.shownFolders = [];
+const L = { list: [], shown: [], loading: false, error: '', off: false, seq: 0, activeCount: 0, filter: 'all' }; // Links page
 $('#sortDir').innerHTML = ico('sort', 17);
 
 function readRoute() {
@@ -153,6 +154,7 @@ function applyRoute() {
 window.addEventListener('hashchange', applyRoute);
 
 async function load(silent) {
+  if (S.kind === 'links') { ++S.seq; return loadLinks(silent); }
   const seq = ++S.seq;
   if (!silent) { S.loading = true; S.error = ''; render(); }
   try {
@@ -235,13 +237,17 @@ function renderNav() {
   const bt = (S.usage && S.usage.byType) || {};
   $('#nav').innerHTML = NAV.map((n) => {
     const on = n[0] === '' ? !S.kind : S.kind === n[0];
-    const c = bt[n[0]] ? bt[n[0]].count : 0;
+    const c = n[0] === 'links' ? L.activeCount : bt[n[0]] ? bt[n[0]].count : 0;
     return '<a href="' + (n[0] ? '#view=' + n[0] : '#') + '" class="' + (on ? 'on' : '') + '">' + ico(n[2], 18) + '<span>' + n[1] + '</span>' + (c ? '<em>' + c + '</em>' : '') + '</a>';
   }).join('');
 }
 
 function render() {
   renderCrumbs(); renderNav(); applyView();
+  const lk = S.kind === 'links';
+  $('#linksSec').hidden = !lk; $('#filesSec').hidden = lk;
+  $('#q').placeholder = lk ? 'Search links and file names' : 'Search the files';
+  if (lk) { $('#folderSec').hidden = true; $('#selbar').hidden = true; renderLinks(); return; }
   $('#trashbar').hidden = S.kind !== 'trash';
   $('#trashText').textContent = 'Deleted files stay here for ' + BOOT.trashDays + ' days, then they are removed automatically.';
   const list = $('#list'), typeMode = !!S.kind;
@@ -895,6 +901,192 @@ async function openShare(it) {
     } catch (err) { toast(err.message, 'err'); }
   };
 }
+/* --- Links page: every short link with its validity; change expiry, address or file, or delete it --- */
+const nowS = () => Math.floor(Date.now() / 1000);
+const lkState = (l) => (l.missing ? 'broken' : l.active ? 'active' : 'expired');
+function inWords(sec) {
+  const a = Math.abs(sec);
+  if (a < 3600) return Math.max(1, Math.round(a / 60)) + ' min';
+  if (a < 86400) return Math.round(a / 3600) + ' h';
+  return Math.round(a / 86400) + (Math.round(a / 86400) === 1 ? ' day' : ' days');
+}
+const fwhen = (s) => new Date(s * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+function lkValidity(l) {
+  if (!l.exp) return 'Never expires';
+  const d = l.exp - nowS();
+  return d > 0 ? 'Expires in ' + inWords(d) : 'Expired ' + inWords(d) + ' ago';
+}
+async function loadLinks(silent) {
+  const seq = ++L.seq;
+  if (!silent || !L.list.length) { L.loading = true; L.error = ''; render(); }
+  const all = [];
+  try {
+    let after = '', pages = 0;
+    do {
+      const r = await api('/api/links?after=' + encodeURIComponent(after));
+      if (seq !== L.seq) return;
+      L.off = !!r.off;
+      all.push(...r.links);
+      after = r.next;
+      if (after) { L.list = all.slice(); L.loading = false; render(); } // show what we have while the rest loads
+    } while (after && ++pages < 100);
+    L.list = all; L.loading = false; L.error = '';
+  } catch (e) {
+    if (seq !== L.seq) return;
+    L.loading = false;
+    if (silent && L.list.length) toast(e.message, 'err'); else L.error = e.message;
+  }
+  L.activeCount = L.list.filter((l) => lkState(l) === 'active').length;
+  render();
+}
+function linkRowHtml(l, i) {
+  const st = lkState(l), nm = l.key ? l.key.split('/').pop() : l.name;
+  const pill = { active: 'Active', expired: 'Expired', broken: 'File missing' }[st];
+  const exact = l.exp ? fwhen(l.exp) : 'No end date';
+  return '<div class="lk-row ' + st + '" data-l="' + i + '">' + tile(kindOf(nm), 18) +
+    '<div class="lk-main"><div class="lk-top"><a class="lk-url" href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer" title="Open ' + esc(l.url) + '">' + esc(l.url.replace(/^https?:\/\//, '')) + '</a>' +
+    '<button class="ib" data-la="copy" title="Copy link" aria-label="Copy link">' + ico('copy', 16) + '</button></div>' +
+    '<small class="lk-file">' + (l.key ? '<a data-la="goto" title="Show in folder">' + esc(l.key) + '</a>' : 'No file') + (l.size ? ' · ' + fmt(l.size) : '') + '</small></div>' +
+    '<div class="lk-val"><span class="pill ' + st + '">' + pill + '</span><small title="' + esc(exact) + '">' + esc(lkValidity(l)) + '</small><small class="lk-exact">' + esc(exact) + '</small></div>' +
+    '<div class="lk-acts"><button class="btn" data-la="valid" title="Change validity">' + ico('clock', 16) + '<span>Validity</span></button>' +
+    '<button class="ib" data-la="more" title="More" aria-label="More actions">' + ico('more', 18) + '</button></div></div>';
+}
+function renderLinks() {
+  const box = $('#lkList');
+  $('#lkRefresh').innerHTML = ico('retry', 17);
+  if (L.loading) { box.innerHTML = '<div class="empty"><div class="spin" style="margin:0 auto 12px"></div><p>Loading links…</p></div>'; $('#lkCount').textContent = ''; $('#lkClean').hidden = true; return; }
+  if (L.error) { box.innerHTML = '<div class="empty"><h3>Could not load the links</h3><p>' + esc(L.error) + '</p><button class="btn primary" data-la="reload">Try again</button></div>'; return; }
+  if (L.off) { box.innerHTML = '<div class="empty">' + tile('file', 28) + '<h3>Short links are off</h3><p>Set PUBLIC_HOST in src/config.js to use short links.</p></div>'; return; }
+  const q = S.q.trim().toLowerCase();
+  const rank = { active: 0, expired: 1, broken: 2 };
+  L.shown = L.list.filter((l) => (L.filter === 'all' || lkState(l) === L.filter) && (!q || l.name.toLowerCase().indexOf(q) >= 0 || l.key.toLowerCase().indexOf(q) >= 0))
+    .sort((a, b) => rank[lkState(a)] - rank[lkState(b)] || (b.t || 0) - (a.t || 0));
+  const dead = L.list.filter((l) => lkState(l) !== 'active').length;
+  $('#lkClean').hidden = !dead;
+  $('#lkClean').textContent = 'Clean up (' + dead + ')';
+  $('#lkCount').textContent = (L.shown.length !== L.list.length ? L.shown.length + ' of ' : '') + L.list.length + (L.list.length === 1 ? ' link' : ' links');
+  if (L.shown.length) box.innerHTML = L.shown.map(linkRowHtml).join('');
+  else if (L.list.length) box.innerHTML = '<div class="empty"><h3>No matches</h3><p>No link matches this filter.</p></div>';
+  else box.innerHTML = '<div class="empty">' + tile('file', 28) + '<h3>No links yet</h3><p>Open a file’s menu and choose “Share link…” to create one. It shows up here.</p></div>';
+}
+async function lkUpdate(l, body, msg) {
+  try {
+    const r = await api('/api/link-update', Object.assign({ name: l.name }, body));
+    Object.assign(l, r, { missing: body.key ? false : l.missing });
+    L.activeCount = L.list.filter((x) => lkState(x) === 'active').length;
+    render();
+    if (msg) toast(msg, 'ok');
+    return true;
+  } catch (e) { toast(e.message, 'err'); return false; }
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+const toLocalInput = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+function openValidity(l) {
+  const cur = () => (l.exp ? (l.exp > nowS() ? 'Works until ' + fwhen(l.exp) + ' (' + lkValidity(l).toLowerCase() + ').' : 'Expired on ' + fwhen(l.exp) + '.') : 'Never expires.');
+  const opts = [[3600, '1 hour'], [86400, '1 day'], [604800, '7 days'], [2592000, '30 days'], [7776000, '90 days'], [0, 'Never']];
+  const def = new Date(Math.min(Math.max(Date.now(), (l.exp || 0) * 1000) + 86400000, Date.now() + 364 * 86400000));
+  openModal('<div class="dlg" role="dialog" aria-modal="true"><h2>Validity</h2><p class="lk-dlgurl">' + esc(l.url.replace(/^https?:\/\//, '')) + '</p>' +
+    '<div class="lk-cur" id="lkCur">' + esc(cur()) + '</div>' +
+    '<span class="lbl2">Works for (from now)</span><div class="seg3">' + opts.map((o) => '<button class="btn" data-v="' + o[0] + '">' + o[1] + '</button>').join('') + '</div>' +
+    '<span class="lbl2">Or until a date</span><div class="copyrow"><input id="lkDate" class="field" type="datetime-local" min="' + toLocalInput(new Date()) + '" max="' + toLocalInput(new Date(Date.now() + 364 * 86400000)) + '" value="' + toLocalInput(def) + '"><button class="btn primary" data-v="date">Set</button></div>' +
+    '<small class="hint">The link address stays the same; only how long it works changes.</small>' +
+    '<div class="dlg-acts">' + (lkState(l) === 'active' ? '<button class="btn danger" data-v="off">Turn off now</button>' : '') + '<button class="btn" data-x="no">Close</button></div></div>');
+  modalEl.onclick = async (e) => {
+    if (e.target.closest('[data-x]')) { closeModal(); return; }
+    const b = e.target.closest('[data-v]'); if (!b) return;
+    let exp, v = b.dataset.v;
+    if (v === 'date') {
+      const t = new Date($('#lkDate').value).getTime();
+      if (!t || t <= Date.now()) { toast('Pick a date in the future.', 'err'); return; }
+      exp = Math.floor(t / 1000);
+    } else if (v === 'off') exp = nowS();
+    else exp = +v ? nowS() + +v : 0;
+    if (await lkUpdate(l, { exp }, v === 'off' ? 'Link turned off.' : 'Validity updated.')) closeModal();
+  };
+}
+async function renameLink(l) {
+  const v = await askName('Change link address', 'The old address stops working. Only the part after ' + BOOT.publicHost + '/ changes.', l.name, 'Save');
+  if (!v || v === l.name) return;
+  const old = l.name;
+  if (await lkUpdate(l, { newName: v }, 'Link address changed.')) { const u = l.url; if (l.name !== old) copyText(u).then((ok) => ok && toast('New link copied', 'ok')); }
+}
+function pickFile(title, start) {
+  return new Promise((resolve) => {
+    let dir = start || '', val = null;
+    const draw = async () => {
+      let cr = '<a data-d="">' + esc(BOOT.title) + '</a>', acc = '';
+      dir.split('/').filter(Boolean).forEach((p) => { acc += p + '/'; cr += '<span class="sep">' + ico('chev', 14) + '</span><a data-d="' + esc(acc) + '">' + esc(p) + '</a>'; });
+      modalEl.innerHTML = '<div class="dlg pick" role="dialog" aria-modal="true"><h2>' + esc(title) + '</h2><div class="arc-crumbs">' + cr + '</div><div class="pk-list" id="pkList"><div class="spin" style="margin:28px auto"></div></div><div class="dlg-acts"><button class="btn" data-x="no">Cancel</button></div></div>';
+      const mine = dir;
+      try {
+        const d = await api('/api/list?prefix=' + encodeURIComponent(dir));
+        if (mine !== dir || !$('#pkList')) return;
+        const rows = d.folders.map((f) => '<div class="pk-row" data-d="' + esc(f) + '">' + ico('folder', 18) + '<span>' + esc(f.slice(dir.length).replace(/\/$/, '')) + '</span></div>')
+          .concat(d.files.filter((f) => !f.key.endsWith('/')).map((f) => { const n = f.key.slice(dir.length); return '<div class="pk-row" data-k="' + esc(f.key) + '">' + ico(GLYPH[kindOf(n)], 18) + '<span>' + esc(n) + '</span><small class="pk-sz">' + fmt(f.size) + '</small></div>'; }));
+        $('#pkList').innerHTML = rows.length ? rows.join('') : '<div class="empty" style="padding:28px 12px"><p>This folder is empty.</p></div>';
+      } catch (e) { if ($('#pkList')) $('#pkList').innerHTML = '<div class="empty"><p>' + esc(e.message) + '</p></div>'; }
+    };
+    openModal('', () => resolve(val));
+    modalEl.onclick = (e) => {
+      const d = e.target.closest('[data-d]'); if (d) { dir = d.dataset.d; draw(); return; }
+      const k = e.target.closest('[data-k]'); if (k) { val = k.dataset.k; closeModal(); return; }
+      if (e.target.closest('[data-x]')) closeModal();
+    };
+    draw();
+  });
+}
+async function retargetLink(l) {
+  const start = l.key && l.key.lastIndexOf('/') > 0 ? l.key.slice(0, l.key.lastIndexOf('/') + 1) : '';
+  const k = await pickFile('Point the link to another file', start);
+  if (!k || k === l.key) return;
+  await lkUpdate(l, { key: k }, 'The link now opens “' + k.split('/').pop() + '”.');
+}
+async function deleteLinks(list, ask) {
+  if (!list.length) return;
+  if (ask) {
+    const ok = list.length === 1
+      ? await confirmDlg('Delete this link?', list[0].url.replace(/^https?:\/\//, '') + ' will stop working. The file itself is not touched.', 'Delete link')
+      : await confirmDlg('Delete ' + list.length + ' links?', 'All expired links and links whose file is missing will be removed. Files are not touched.', 'Delete links');
+    if (!ok) return;
+  }
+  const r = await runBatches('Deleting links', list, 1, async (ch) => { await api('/api/link-delete', { name: ch[0].name }); return {}; });
+  if (!r) return;
+  if (r.errors.length) toast('Some links could not be deleted: ' + r.errors[0], 'err', 9000); else toast(r.done === 1 ? 'Link deleted.' : r.done + ' links deleted.', 'ok');
+  loadLinks(true);
+}
+function showLinkFile(l) { if (!l.key) return; const i = l.key.lastIndexOf('/'); go(i > 0 ? l.key.slice(0, i + 1) : ''); }
+async function linkMenu(l, x, y) {
+  const st = lkState(l);
+  const rows = [['copy', 'copy', 'Copy link'], ['open', 'ext', 'Open link'], '-', ['valid', 'clock', 'Change validity…'], ['rename', 'edit', 'Change link address…'], ['target', 'move', 'Point to another file…']];
+  if (st !== 'broken') rows.push(['goto', 'folder', 'Show file in folder']);
+  if (st === 'active') rows.push('-', ['off', 'x', 'Turn off now']);
+  rows.push('-', ['del', 'trash', 'Delete link', true]);
+  const a = await showMenu(l.url.replace(/^https?:\/\//, ''), rows, x, y);
+  if (a) linkAct(a, l);
+}
+function linkAct(a, l, el) {
+  if (a === 'copy') copyText(l.url).then((ok) => toast(ok ? 'Link copied' : l.url, ok ? 'ok' : 'info', ok ? 2500 : 9000));
+  else if (a === 'open') window.open(l.url, '_blank', 'noopener');
+  else if (a === 'valid') openValidity(l);
+  else if (a === 'rename') renameLink(l);
+  else if (a === 'target') retargetLink(l);
+  else if (a === 'goto') showLinkFile(l);
+  else if (a === 'off') lkUpdate(l, { exp: nowS() }, 'Link turned off.');
+  else if (a === 'del') deleteLinks([l], true);
+  else if (a === 'more' && el) { const r = el.getBoundingClientRect(); linkMenu(l, r.left, r.bottom + 4); }
+}
+$('#lkList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-la]');
+  if (b && b.dataset.la === 'reload') { loadLinks(); return; }
+  const row = e.target.closest('[data-l]'); if (!row) return;
+  const l = L.shown[+row.dataset.l]; if (!l) return;
+  if (b) { e.preventDefault(); linkAct(b.dataset.la, l, b); return; }
+  if (!e.target.closest('a')) linkMenu(l, e.clientX, e.clientY);
+});
+$('#lkFilter').addEventListener('change', (e) => { L.filter = e.target.value; render(); });
+$('#lkRefresh').onclick = () => loadLinks();
+$('#lkClean').onclick = () => deleteLinks(L.list.filter((l) => lkState(l) !== 'active'), true);
+
 function fileRows(it) {
   if (it.trash) return [['restore', 'retry', 'Restore'], ['note', 'note', S.notes[it.key] ? 'Edit note…' : 'Add note…'], ['select', 'check', 'Select'], '-', ['purge', 'trash', 'Delete forever', true]];
   const rows = [];
@@ -1212,6 +1404,7 @@ async function ctxEmpty(x, y) {
 const NOCTX = 'input,textarea,select,button,a,label,.nav,.navcard,.usage,.selbar,.note,.thead,.searchbar,.sec-h,.crumbs,.ctx,.sheet,.uploads,.job,.fab,#modal';
 function ctxAt(t, x, y) {
   if (!t || !t.closest) return false;
+  if (S.kind === 'links') { const lr = t.closest('#lkList [data-l]'); if (lr && !t.closest('a,button')) { const l = L.shown[+lr.dataset.l]; if (l) { linkMenu(l, x, y); return true; } } return false; }
   const row = t.closest('#list [data-i]'), fc = t.closest('#folders [data-f]');
   if (row) { const it = S.shown[+row.dataset.i]; if (it) { ctxItem(it, x, y); return true; } return false; }
   if (fc) { const f = S.shownFolders[+fc.dataset.f]; if (f) { ctxFolder(f, x, y); return true; } return false; }

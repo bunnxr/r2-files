@@ -35,6 +35,6 @@ The bucket CORS policy and the Access application are set up as in the setup gui
 ## Restyling (by hand or with another AI agent)
 Only the files in `public/` need to change; leave `src/` alone.
 - `style.css`: free to change (colours are CSS variables at the top; light theme only).
-- `index.html`: free to re-layout, but keep these element ids because `app.js` uses them: `logo file uploadIco btnFolder folderIco nav uBig uSub uSeg uTypes q searchIco crumbs folderSec folders filesTitle count sortBy sortDir btnView list drop uploads upTitle upSub upToggle upClear upBar upList modal toasts`.
+- `index.html`: free to re-layout, but keep these element ids because `app.js` uses them: `logo file uploadIco btnFolder folderIco nav uBig uSub uSeg uTypes q searchIco crumbs folderSec folders filesTitle count sortBy sortDir btnView list drop uploads upTitle upSub upToggle upClear upBar upList modal toasts filesSec linksSec lkCount lkFilter lkClean lkRefresh lkList`.
 - `app.js`: the functions `itemHtml`, `folderHtml`, `theadHtml` and `render` build the file rows and cards. Class names and `data-*` attributes there (`data-act`, `data-i`, `data-f`, `data-sort`, `data-u`) are used by the click handlers, so keep them.
 - Do not add external scripts or fonts: the Content-Security-Policy in `src/pages.js` blocks them.
