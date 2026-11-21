@@ -78,15 +78,24 @@ const ORB = "<circle cx='11' cy='13' r='8.5' fill='#0f766e'/><circle cx='9.4' cy
 const ORB_ICON = "data:image/svg+xml," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>" + ORB + "</svg>");
 const escHtml = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 
-function viewerPage(key, cache) {
+// Sub-requests a view-only file may be loaded by (from the viewer page). "empty" covers the
+// follow-up range requests some built-in viewers make (e.g. large PDFs).
+const VIEW_DESTS = new Set(["video", "audio", "image", "iframe", "embed", "object", "empty"]);
+
+// guard: view-only link. Hides the download / picture-in-picture options, turns off right-click and
+// the long-press menu, and hides the PDF toolbar (Chrome / Edge honour #toolbar=0).
+function viewerPage(key, cache, guard) {
   const name = key.split("/").pop(), mime = viewMime(name);
   if (!mime || /^text\/html/.test(mime)) return null; // HTML files show themselves (sandboxed)
   const n = escHtml(name);
+  const media = guard ? ' controlslist="nodownload noremoteplayback noplaybackrate" disablepictureinpicture disableremoteplayback' : '';
   let body;
-  if (mime.startsWith("video/")) body = '<video src="?raw=1" controls autoplay playsinline preload="metadata"></video>';
-  else if (mime.startsWith("audio/")) body = '<audio src="?raw=1" controls autoplay preload="metadata"></audio>';
-  else if (mime.startsWith("image/")) body = '<img src="?raw=1" alt="' + n + '">';
-  else body = '<iframe src="?raw=1" title="' + n + '"></iframe>'; // PDF, text, JSON …
+  if (mime.startsWith("video/")) body = '<video src="?raw=1" controls autoplay playsinline preload="metadata"' + media + '></video>';
+  else if (mime.startsWith("audio/")) body = '<audio src="?raw=1" controls autoplay preload="metadata"' + media + '></audio>';
+  else if (mime.startsWith("image/")) body = '<img src="?raw=1" alt="' + n + '"' + (guard ? ' draggable="false"' : '') + '>';
+  else body = '<iframe src="?raw=1' + (guard && mime === "application/pdf" ? '#toolbar=0&amp;navpanes=0' : '') + '" title="' + n + '"></iframe>'; // PDF, text, JSON …
+  const nonce = guard ? crypto.randomUUID().replace(/-/g, "") : "";
+  const script = guard ? '<script nonce="' + nonce + '">addEventListener("contextmenu",function(e){e.preventDefault()});addEventListener("dragstart",function(e){e.preventDefault()});addEventListener("keydown",function(e){if((e.ctrlKey||e.metaKey)&&(e.key==="s"||e.key==="S"))e.preventDefault()})</script>' : '';
   const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>' + n + '</title><link rel="icon" type="image/svg+xml" href="' + ORB_ICON + '"><link rel="alternate icon" href="/favicon.ico">' +
     '<meta name="robots" content="noindex"><meta name="theme-color" content="#121514"><style>' +
@@ -94,11 +103,12 @@ function viewerPage(key, cache) {
     'main{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}' +
     'video,img{max-width:100%;max-height:100%;display:block}iframe{width:100%;height:100%;border:0;background:#fff}' +
     'audio{width:min(420px,90vw)}' +
-    '</style></head><body><main>' + body + '</main></body></html>';
+    (guard ? 'video,img,audio{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}img{pointer-events:none}' : '') +
+    '</style>' + script + '</head><body><main>' + body + '</main></body></html>';
   return new Response(html, { headers: {
-    "content-type": "text/html; charset=utf-8", "cache-control": cache, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
-    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-    "vary": "Sec-Fetch-Dest",
+    "content-type": "text/html; charset=utf-8", "cache-control": guard ? "private, no-store" : cache, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" + (guard ? "; script-src 'nonce-" + nonce + "'" : ""),
+    "vary": "Sec-Fetch-Dest, Sec-Fetch-Site",
   } });
 }
 
@@ -116,6 +126,24 @@ export async function servePublic(request, c, url, { shortOnly } = {}) {
     if (rec.exp && rec.exp * 1000 < Date.now()) { await dropExpired(c, path); return plain("This link has expired.", 410); }
     const cache = rec.exp ? "private, max-age=0, must-revalidate" : "public, max-age=300";
     const raw = url.searchParams.has("raw");
+
+    // View links are view-only: the file is handed out only to the viewer page's own player / image / frame
+    // (a same-site sub-request), never to a tab, a download (?dl=1 is ignored), another site, curl or a bot.
+    // This stops casual saving; it cannot stop someone determined (developer tools, screen recording).
+    if (rec.mode === "view") {
+      const dest = request.headers.get("sec-fetch-dest") || "", site = request.headers.get("sec-fetch-site") || "";
+      if (dest === "document") {
+        const page = viewerPage(rec.key, cache, true);
+        if (page) return page;
+        // not something a browser can show by itself (e.g. an HTML file): serve it as is, sandboxed
+      } else if ((site !== "same-origin" && site !== "none") || !VIEW_DESTS.has(dest)) { // "none": requests made by the browser itself (built-in PDF viewer)
+        return plain("This file can only be viewed in the browser, at its link.", 403);
+      }
+      const res = await streamObject(c, request, rec.key, { dl: false, view: true, cors: true, cache: "private, no-store" }); // cors: true also keeps HTML / SVG sandboxed
+      res.headers.set("vary", "Sec-Fetch-Dest, Sec-Fetch-Site");
+      return res;
+    }
+
     // Someone opened a viewable link in a browser tab: wrap the file in a small page of our own, so the tab
     // carries the site's logo and the file name. The page loads the file itself from ?raw=1. Everything else
     // (video players, <img> embeds, iframes, curl, link-preview bots, ?dl=1) still gets the bare file.

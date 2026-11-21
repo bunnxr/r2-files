@@ -929,7 +929,7 @@ async function moveFiles(list, mode) {
 // Files a browser can open by itself (same list as VIEW_MIME in src/util.js)
 const VIEW_EXT = ' pdf jpg jpeg png gif webp avif svg bmp ico mp4 m4v webm mov ogv mp3 m4a aac wav ogg opus flac txt md log csv srt vtt json xml html htm ';
 const canView = (n) => { const i = n.lastIndexOf('.'); return i > 0 && VIEW_EXT.indexOf(' ' + n.slice(i + 1).toLowerCase() + ' ') >= 0; };
-const MODE_TXT = { view: 'Opens in the browser', download: 'Downloads the file', both: 'Two links: one opens in the browser, one downloads' };
+const MODE_TXT = { view: 'Opens in the browser, view only: no download option', download: 'Downloads the file', both: 'Two links: a view-only one and a download one' };
 async function openShare(it) {
   const pub = isPublicKey(it.key), host = !!BOOT.publicHost, typed = host && canView(it.name);
   let mode = typed ? 'view' : '';
@@ -1193,7 +1193,7 @@ function linkAct(a, l, el) {
   else if (a === 'target') retargetLink(l);
   else if (a === 'goto') showLinkFile(l);
   else if (a === 'newfor') newLinkDlg(l.key);
-  else if (a === 'mview') lkUpdate(l, { mode: 'view' }, 'The link now opens in the browser.');
+  else if (a === 'mview') lkUpdate(l, { mode: 'view' }, 'The link now opens in the browser, view only.');
   else if (a === 'mdl') lkUpdate(l, { mode: 'download' }, 'The link now downloads the file.');
   else if (a === 'same') { S.q = l.key; $('#q').value = l.key; render(); }
   else if (a === 'del') deleteLinks([l], true);
