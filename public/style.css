@@ -477,10 +477,10 @@ b,strong{font-weight:600}
 .item.fitem .sz{color:var(--muted)}
 .item.fitem .nt{pointer-events:none}
 /* ---- liquid New button (shape drawn by liquidButton() in app.js) ---- */
-.newbtn.is-liquid{position:relative;isolation:isolate;overflow:visible;background:transparent!important;box-shadow:none;border-radius:999px;color:#fff;transition:transform .15s var(--ease)}
+.newbtn.is-liquid{position:relative;isolation:isolate;overflow:visible;background:transparent!important;box-shadow:none;border-radius:999px;color:var(--accent);font-weight:600;transition:transform .15s var(--ease)}
 .newbtn.is-liquid:hover{filter:none}
 .newbtn.is-liquid:active{transform:scale(.97)}
 .newbtn.is-liquid:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
-.newbtn .liquid{position:absolute;left:-34px;top:-34px;z-index:-1;pointer-events:none;overflow:visible;filter:drop-shadow(0 8px 14px rgba(15,118,110,.32))}
+.newbtn .liquid{position:absolute;left:-22px;top:-22px;z-index:-1;pointer-events:none;overflow:visible}
 .newbtn .lq-glow{opacity:0;transition:opacity .3s}
 .newbtn .liquid.lit .lq-glow{opacity:1}

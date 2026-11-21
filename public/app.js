@@ -1498,12 +1498,12 @@ $('#btnNew').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(
    Drawn as an SVG path behind the label; the <button> itself stays a normal button. --- */
 function liquidButton(btn) {
   if (!btn || matchMedia('(prefers-reduced-motion: reduce)').matches) return; // plain pill from the CSS
-  const NS = 'http://www.w3.org/2000/svg', PAD = 34, REACH = 95, PULL = 0.6, MAXD = 28;
+  const NS = 'http://www.w3.org/2000/svg', PAD = 22, REACH = 80, PULL = 0.3, MAXD = 13;
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('class', 'liquid'); svg.setAttribute('aria-hidden', 'true');
   svg.innerHTML = '<defs><linearGradient id="lqFill" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16927f"/><stop offset="1" stop-color="#0b5e57"/></linearGradient>' +
-    '<radialGradient id="lqGlow" gradientUnits="userSpaceOnUse" r="90"><stop offset="0" stop-color="#7ff0dc" stop-opacity=".45"/><stop offset="1" stop-color="#7ff0dc" stop-opacity="0"/></radialGradient></defs>' +
-    '<path class="lq-body" fill="url(#lqFill)"/><path class="lq-glow" fill="url(#lqGlow)"/>';
+    '<radialGradient id="lqGlow" gradientUnits="userSpaceOnUse" r="90"><stop offset="0" stop-color="#0f766e" stop-opacity=".14"/><stop offset="1" stop-color="#0f766e" stop-opacity="0"/></radialGradient></defs>' +
+    '<path class="lq-glow" fill="url(#lqGlow)"/><path class="lq-body" fill="none" stroke="url(#lqFill)" stroke-width="2"/>';
   btn.classList.add('is-liquid');
   btn.prepend(svg);
   const body = svg.querySelector('.lq-body'), glow = svg.querySelector('.lq-glow'), grad = svg.querySelector('#lqGlow');
