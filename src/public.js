@@ -70,8 +70,8 @@ async function streamObject(c, request, key, { dl, view, cache, cors }) {
 export const proxyRead = (c, request, key) => streamObject(c, request, key, { dl: false, cache: "no-store", cors: false });
 
 // ---------------------------------------------------------------------
-//  Viewer page for short links opened in a tab: the site's logo as the tab icon, the file name as the
-//  title, a slim bar with a download button, and the file shown full size (video / audio player,
+//  Viewer page for short links opened in a tab: the site's logo as the tab icon and the file name as the
+//  title. The page itself is empty apart from the file, shown full size (video / audio player,
 //  image, PDF or text). No scripts. The orb logo matches public/favicon.ico and the app header.
 // ---------------------------------------------------------------------
 const ORB = "<circle cx='11' cy='13' r='8.5' fill='#0f766e'/><circle cx='9.4' cy='11.2' r='6.4' fill='#1f9686'/><circle cx='8.2' cy='9.8' r='3.6' fill='#45b8a7'/><circle cx='19.6' cy='4.6' r='2.1' fill='#2fa594'/>";
@@ -84,20 +84,17 @@ function viewerPage(key, cache) {
   const n = escHtml(name);
   let body;
   if (mime.startsWith("video/")) body = '<video src="?raw=1" controls autoplay playsinline preload="metadata"></video>';
-  else if (mime.startsWith("audio/")) body = '<div class="aud"><svg viewBox="0 0 24 24" width="96" height="96">' + ORB + '</svg><b>' + n + '</b><audio src="?raw=1" controls autoplay preload="metadata"></audio></div>';
+  else if (mime.startsWith("audio/")) body = '<audio src="?raw=1" controls autoplay preload="metadata"></audio>';
   else if (mime.startsWith("image/")) body = '<img src="?raw=1" alt="' + n + '">';
   else body = '<iframe src="?raw=1" title="' + n + '"></iframe>'; // PDF, text, JSON …
   const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>' + n + '</title><link rel="icon" type="image/svg+xml" href="' + ORB_ICON + '"><link rel="alternate icon" href="/favicon.ico">' +
     '<meta name="robots" content="noindex"><meta name="theme-color" content="#121514"><style>' +
     'html,body{height:100%;margin:0}body{display:flex;flex-direction:column;background:#121514;color:#e9ecea;font:500 14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}' +
-    'header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#0c0e0d;border-bottom:1px solid #1f2422}' +
-    'header svg{flex:none}header .t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25}header span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}header small{font-size:10px;font-weight:500;color:#7d8682;letter-spacing:.02em}' +
-    'header a{flex:none;color:#7fd8c9;text-decoration:none;font-weight:600;padding:6px 12px;border:1.5px solid #2a6f66;border-radius:999px}header a:hover{background:#163b36}' +
     'main{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}' +
     'video,img{max-width:100%;max-height:100%;display:block}iframe{width:100%;height:100%;border:0;background:#fff}' +
-    '.aud{display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px;text-align:center}.aud audio{width:min(420px,90vw)}' +
-    '</style></head><body><header><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">' + ORB + '</svg><div class="t"><span title="' + n + '">' + n + '</span><small>@bunnxr</small></div><a href="?dl=1">Download</a></header><main>' + body + '</main></body></html>';
+    'audio{width:min(420px,90vw)}' +
+    '</style></head><body><main>' + body + '</main></body></html>';
   return new Response(html, { headers: {
     "content-type": "text/html; charset=utf-8", "cache-control": cache, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
     "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
