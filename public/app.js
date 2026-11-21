@@ -1430,8 +1430,8 @@ renderResumeNote();
 
 /* ---------- New menu, right-click / long-press menus, new text + zip files, largest files ---------- */
 $('#newIco').innerHTML = ico('plus', 20);
-$('#uIco').innerHTML = ico('database', 22);
-$('#uGo').innerHTML = ico('chev', 18);
+$('#uIco').innerHTML = ico('database', 18);
+$('#uGo').innerHTML = ico('chev', 15);
 $('#usageCard').onclick = () => openLargest();
 
 let ctxEl = null, lastNative = 0, lastHold = 0, suppressClick = 0;
