@@ -299,7 +299,7 @@ main{min-width:0}
 @media(max-width:759px){.seg4{grid-template-columns:repeat(2,1fr)}}
 
 /* ---- flat, material look: soft fills instead of borders and shadows ---- */
-:root{--bg:#faf8f4;--card:#fff;--border:transparent;--shadow:none;--hover:#f3f3f2;--zebra:transparent;--muted:#6b6f69;--fill:#f2f2f1;--line:#e8e7e4;--sel:#d5ece7}
+:root{--bg:#faf8f4;--card:#fff;--border:transparent;--shadow:none;--hover:#f3f3f2;--zebra:transparent;--muted:#6b6f69;--fill:#f2f2f1;--line:transparent;--sel:#d5ece7}
 body{background:var(--bg)}
 .card{background:var(--card);border:1px solid var(--line);box-shadow:none}
 .side .card{background:var(--card)}
@@ -441,7 +441,7 @@ body.selmode #list .sel{display:block}
 .upcard .field.mono:focus{box-shadow:0 0 0 2px var(--accent)}
 .up-hint{display:block;margin:8px 0 0;color:var(--muted);font-size:13px}
 .up-next{margin-top:10px;font-weight:600;color:var(--text)}
-.up-row{display:flex;align-items:center;gap:16px;margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
+.up-row{display:flex;align-items:center;gap:16px;margin-top:20px;padding-top:18px;border-top:1px solid #ececea}
 .up-txt{flex:1;min-width:0}
 .up-txt b{display:block}
 .up-txt small{display:block;color:var(--muted);font-size:13px}
