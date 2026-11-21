@@ -58,6 +58,9 @@ async function inShortener(c, name) {
 }
 const shortenerTaken = (c, name) => new HttpError(409, (c.LINK_HOST || c.PUBLIC_HOST) + "/" + name + " already exists in your link shortener. Pick another address.");
 
+// Addresses a link may never use: the browser asks every domain for /favicon.ico (served by worker.js)
+const RESERVED = new Set(["favicon.ico"]);
+
 // First unused address based on the file name: charlie.zip, then charlie-2.zip, charlie-3.zip …
 // Existing links (even expired ones) are never taken over: each one is a separate link now.
 async function freeName(c, key, suffix) {
@@ -65,7 +68,7 @@ async function freeName(c, key, suffix) {
   const dot = file.lastIndexOf("."), stem = (dot > 0 ? file.slice(0, dot) : file) + (suffix || ""), ext = dot > 0 ? file.slice(dot) : "";
   for (let i = 1; i <= 25; i++) { // 25 keeps us under the Free plan's 50-subrequest cap
     const cand = i === 1 ? stem + ext : stem + "-" + i + ext;
-    if (!(await read(c, nameObj(cand))) && !(await inShortener(c, cand))) return cand;
+    if (!RESERVED.has(cand.toLowerCase()) && !(await read(c, nameObj(cand))) && !(await inShortener(c, cand))) return cand;
   }
   throw new HttpError(409, "Too many links use this file name. Pick a custom address instead.");
 }
@@ -132,7 +135,7 @@ async function unsetMain(c, key, name) {
 const MAX_DAYS = 365;
 const cleanName = (raw) => {
   const n = sanitizeName(String(raw ?? "").trim()).replace(/\s+/g, "-");
-  if (!validKey(nameObj(n), "file") || n.length > 180) throw new HttpError(400, "That link name is not allowed.");
+  if (!validKey(nameObj(n), "file") || n.length > 180 || RESERVED.has(n.toLowerCase())) throw new HttpError(400, "That link name is not allowed.");
   return n;
 };
 const goodTarget = (k) => validKey(k, "file") && !k.startsWith(".trash/") && !isInternal(k);

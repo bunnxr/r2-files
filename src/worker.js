@@ -40,6 +40,12 @@ async function handle(request, env, ctx) {
     return isApi ? json({ error: "Not configured yet: edit the CONFIG block." }, 503) : notConfiguredPage(problems);
   }
   // The public hostname only ever serves files (public folders and signed share links): no UI, no API, no login
+  // Tab icon for shared files: browsers ask the domain for /favicon.ico when they show a PDF,
+  // video or image directly, so links on bunnxr.com and r2.bunnxr.com show the drive's logo.
+  if ((isPublicHost || isLinkHost) && url.pathname === "/favicon.ico" && env.ASSETS) {
+    const res = await env.ASSETS.fetch(new Request(url.origin + "/favicon.ico"));
+    if (res.ok) return new Response(res.body, { headers: { "content-type": "image/x-icon", "cache-control": "public, max-age=86400" } });
+  }
   if (isPublicHost) return servePublic(request, c, url);
   if (isLinkHost) return servePublic(request, c, url, { shortOnly: true }); // bunnxr.com: short links only, no public folders
   // The shortener's "R2 files" folder, through its service binding (see src/internal.js)
