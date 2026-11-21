@@ -194,13 +194,9 @@ async function load(silent) {
 }
 
 async function loadUsage() {
-  try {
-    const u = await api('/api/usage');
-    S.usage = u;
-    $('#uBig').textContent = fmt(u.used);
-    $('#uSub').textContent = u.count + (u.count === 1 ? ' file' : ' files') + (u.partial ? ' (at least)' : '');
-    renderNav();
-  } catch (e) { $('#uBig').textContent = '–'; $('#uSub').textContent = e.message; }
+  try { S.usage = await api('/api/usage'); S.usageErr = ''; }
+  catch (e) { S.usageErr = e.message; }
+  renderNav(); // storage is drawn as the last item of the menu
 }
 
 function filtered() {
@@ -244,8 +240,17 @@ function renderNav() {
     const on = n[0] === '' ? !S.kind : S.kind === n[0];
     const c = n[0] === 'links' ? L.activeCount : bt[n[0]] ? bt[n[0]].count : 0;
     return '<a href="' + (n[0] ? '#view=' + n[0] : '#') + '" class="' + (on ? 'on' : '') + '">' + ico(n[2], 18) + '<span>' + n[1] + '</span>' + (c ? '<em>' + c + '</em>' : '') + '</a>';
-  }).join('');
+  }).join('') + usageItem();
 }
+// Storage used: the last menu item (same look as the others). Opens the largest files.
+function usageItem() {
+  const u = S.usage;
+  const val = u ? fmt(u.used) : S.usageErr ? '–' : '…';
+  const tip = u ? fmt(u.used) + ' used by ' + u.count + (u.count === 1 ? ' file' : ' files') + (u.partial ? ' (at least)' : '') + '. Click to see the largest files.' : S.usageErr || 'Storage used';
+  return '<a id="usageCard" class="usage" data-usage role="button" tabindex="0" title="' + esc(tip) + '">' + ico('database', 18) + '<span>Storage</span><em id="uBig">' + esc(val) + '</em></a>';
+}
+$('#nav').addEventListener('click', (e) => { if (e.target.closest('[data-usage]')) { e.preventDefault(); openLargest(); } });
+$('#nav').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('[data-usage]')) { e.preventDefault(); openLargest(); } });
 
 function render() {
   renderCrumbs(); renderNav(); applyView();
@@ -1430,9 +1435,6 @@ renderResumeNote();
 
 /* ---------- New menu, right-click / long-press menus, new text + zip files, largest files ---------- */
 $('#newIco').innerHTML = ico('plus', 20);
-$('#uIco').innerHTML = ico('database', 18);
-$('#uGo').innerHTML = ico('chev', 15);
-$('#usageCard').onclick = () => openLargest();
 
 let ctxEl = null, lastNative = 0, lastHold = 0, suppressClick = 0;
 function closeCtx() { if (ctxEl) { ctxEl.remove(); ctxEl = null; } }
