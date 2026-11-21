@@ -70,7 +70,9 @@ main{min-width:0}
 .tools select{height:34px;border-radius:9px;border:1px solid var(--border);background:var(--card);padding:0 8px;font-size:13px}
 .tools .btn{height:34px;width:34px;padding:0}
 
-.folders{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+/* RESERVED for connected drives: card grid of the old "Folders" section (#folderSec / #folders). Folders now
+   show inside the file list (.item.fitem); keep .folders / .fcard / .f-top for a future row of drive cards. */
+&
 .fcard{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:14px 16px;cursor:pointer;transition:border-color .15s}
 .fcard:hover{border-color:var(--accent)}
 .fcard .f-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
@@ -470,3 +472,7 @@ h1,h2,h3,.brand h1,.crumbs,.sec-h h2,.dlg h2{letter-spacing:-.018em}
 .brand h1{font-weight:650}
 .crumbs .cur{font-weight:650}
 b,strong{font-weight:600}
+/* ---- folders inside the file list (rows in list view, cards in grid view), always before the files ---- */
+.item.fitem .nm b{font-weight:600}
+.item.fitem .sz{color:var(--muted)}
+.item.fitem .nt{pointer-events:none}

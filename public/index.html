@@ -34,6 +34,11 @@
     <div id="searchBar" class="card searchbar"><span id="searchIco"></span><input id="q" type="search" placeholder="Search the files" autocomplete="off" aria-label="Search the files"></div>
     <div id="resumeNote" class="note card" hidden><span id="resumeText"></span><button id="resumeDiscard" class="btn">Discard</button></div>
     <nav id="crumbs" class="crumbs" aria-label="Breadcrumb" hidden></nav>
+    <!-- RESERVED for connected drives: the old separate "Folders" section of cards (layout + location:
+         above the file list, below the breadcrumb). Folders are now shown inside #list instead, so this
+         section is always hidden. Keep it: it is meant to be reused for a row of drive cards when
+         multiple drives are connected in the web UI. Styles: .folders / .fcard / .f-top in style.css;
+         markup + click handler: folderHtml() and $('#folders') in app.js. -->
     <section id="folderSec" hidden>
       <div class="sec-h"><h2>Folders</h2></div>
       <div id="folders" class="folders"></div>

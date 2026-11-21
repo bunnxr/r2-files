@@ -230,6 +230,17 @@ function itemHtml(it, i) {
   const k = kindOf(it.name), note = S.notes[it.key] || '', date = esc(fdate(it.modified));
   return '<div class="item go" data-i="' + i + '"><div class="main"><input type="checkbox" class="sel" data-sel aria-label="Select ' + esc(it.name) + '"' + (S.sel.has(it.key) ? ' checked' : '') + '>' + tile(k, 20) + '<div class="nm"><b title="' + esc(it.trash ? it.orig : it.key) + '">' + esc(it.name) + '</b>' + (it.dir ? '<small class="path">' + esc(it.dir) + '</small>' : '') + '<small class="sub"><span>' + fmt(it.size) + '</span><span>' + date + '</span></small></div></div><span class="sz">' + fmt(it.size) + '</span><span class="dt">' + date + '</span><span class="nt' + (note ? '' : ' blank') + '" data-note="' + i + '" title="' + esc(note || 'Add a note') + '">' + esc(note || 'Add note') + '</span></div>';
 }
+// Folders are shown INSIDE the file list (#list), first, as rows / cards like the files.
+// data-f = index into S.shownFolders. Click opens it; right-click / long-press gives Open + Move to trash.
+function folderItemHtml(f, i) {
+  return '<div class="item go fitem" data-f="' + i + '"><div class="main"><input type="checkbox" class="sel" disabled tabindex="-1" aria-hidden="true" style="visibility:hidden">' + tile('folder', 20) + '<div class="nm"><b title="' + esc(f.name) + '">' + esc(f.name) + '</b><small class="sub"><span>Folder</span>' + (isPublicKey(f.key) ? '<span class="badge">Public</span>' : '') + '</small></div></div><span class="sz">—</span><span class="dt"></span><span class="nt blank"></span></div>';
+}
+// ── RESERVED: the previous folder look (separate "Folders" section of cards above the files). ──
+// Not used for folders any more; kept on purpose to be reused for CONNECTED DRIVES (multiple drives
+// in the web UI, e.g. a "Drives" row of cards). Pieces that belong together:
+//   public/index.html  <section id="folderSec"> with <div id="folders" class="folders">  (kept, always hidden)
+//   public/style.css   .folders, .fcard, .f-top rules  (marked "RESERVED for drives")
+//   public/app.js      folderHtml() below + the $('#folders') click handler (card opens / trash button)
 function folderHtml(f, i) {
   return '<div class="fcard" data-f="' + i + '"><div class="f-top">' + tile('folder', 22) + '<button class="ib danger" data-act="delete" title="Move folder to trash" aria-label="Move folder ' + esc(f.name) + ' to trash">' + ico('trash', 17) + '</button></div><b title="' + esc(f.name) + '">' + esc(f.name) + '</b><small>Folder' + (isPublicKey(f.key) ? '<span class="badge">Public</span>' : '') + '</small></div>';
 }
@@ -303,11 +314,9 @@ function render() {
   S.sel.forEach((k) => { if (!have.has(k)) S.sel.delete(k); });
   const v = filtered();
   S.shown = v.files; S.shownFolders = v.folders;
-  $('#folderSec').hidden = !v.folders.length;
-  $('#folders').innerHTML = v.folders.map(folderHtml).join('');
-  if (v.files.length) list.innerHTML = (S.view === 'list' ? theadHtml() : '') + v.files.map(itemHtml).join('');
+  $('#folderSec').hidden = true; // RESERVED for drives (see folderHtml); folders now live in #list
+  if (v.files.length || v.folders.length) list.innerHTML = (S.view === 'list' ? theadHtml() : '') + v.folders.map(folderItemHtml).join('') + v.files.map(itemHtml).join('');
   else if (S.q) list.innerHTML = '<div class="empty">' + tile('file', 28) + '<h3>No matches</h3><p>Nothing here matches “' + esc(S.q) + '”.</p></div>';
-  else if (v.folders.length) list.innerHTML = '<div class="empty"><p>No files in this folder yet. Drop files anywhere to upload.</p></div>';
   else if (typeMode) list.innerHTML = '<div class="empty">' + tile('file', 28) + '<h3>Nothing here yet</h3><p>Files of this type will show up here.</p></div>';
   else list.innerHTML = '<div class="empty">' + tile('folder', 28) + '<h3>This folder is empty</h3><p>Drag files here or choose them from your device.</p><label class="btn primary" for="file">' + ico('upload', 17) + ' Add file</label></div>';
   const total = S.folders.length + S.total;
@@ -320,6 +329,7 @@ $('#q').addEventListener('input', (e) => { S.q = e.target.value; render(); });
 $('#sortBy').addEventListener('change', (e) => { setSort(e.target.value, S.dir); render(); });
 $('#sortDir').onclick = () => { setSort(S.by, -S.dir); render(); };
 $('#btnView').addEventListener('click', render);
+// RESERVED for drives: click handler of the old folder cards in #folders (see folderHtml)
 $('#folders').addEventListener('click', (e) => {
   const row = e.target.closest('[data-f]'); if (!row) return;
   const f = S.shownFolders[+row.dataset.f]; if (!f) return;
@@ -331,6 +341,8 @@ $('#list').addEventListener('click', (e) => {
   if (s) { const k = s.dataset.sort; if (S.by === k) setSort(k, -S.dir); else setSort(k, k === 'date' ? -1 : 1); render(); return; }
   const act = e.target.closest('[data-act]');
   if (act && act.dataset.act === 'retry') { load(); return; }
+  const fr = e.target.closest('[data-f]'); // a folder row / card in the list
+  if (fr) { const f = S.shownFolders[+fr.dataset.f]; if (f && !S.selMode) go(f.key); return; }
   const row = e.target.closest('[data-i]'); if (!row) return;
   const it = S.shown[+row.dataset.i]; if (!it) return;
   if (e.target.closest('[data-sel]')) { toggleSel(it.key, e.target.checked); return; }
@@ -1512,7 +1524,7 @@ const NOCTX = 'input,textarea,select,button,a,label,.nav,.navcard,.usage,.selbar
 function ctxAt(t, x, y) {
   if (!t || !t.closest) return false;
   if (S.kind === 'links') { const lr = t.closest('#lkList [data-l]'); if (lr && !t.closest('a,button')) { const l = L.shown[+lr.dataset.l]; if (l) { linkMenu(l, x, y); return true; } } return false; }
-  const row = t.closest('#list [data-i]'), fc = t.closest('#folders [data-f]');
+  const row = t.closest('#list [data-i]'), fc = t.closest('#list [data-f], #folders [data-f]');
   if (row) { const it = S.shown[+row.dataset.i]; if (it) { ctxItem(it, x, y); return true; } return false; }
   if (fc) { const f = S.shownFolders[+fc.dataset.f]; if (f) { ctxFolder(f, x, y); return true; } return false; }
   if (t.closest(NOCTX)) return false;
