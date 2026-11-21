@@ -1,4 +1,4 @@
-import { HttpError, validKey, validPrefix, sanitizeName } from "./util.js";
+import { HttpError, validKey, validPrefix, sanitizeName, isInternal } from "./util.js";
 import { r2, xmlEsc, xmlTag, r2Error, parseList, uniqueKey } from "./r2.js";
 import { rfc3986 } from "./sigv4.js";
 
@@ -13,7 +13,7 @@ async function uploadInit(c, b) {
 
   // sub-folders from a dropped directory: sanitise every segment
   const rel = typeof b.rel === "string" ? b.rel.split("/").filter(Boolean).slice(0, 20).map(sanitizeName).join("/") : "";
-  if (prefix.startsWith(".trash/") || (prefix.startsWith(".links/") || prefix.startsWith(".notes/"))) throw new HttpError(400, "That folder is reserved.");
+  if (prefix.startsWith(".trash/") || isInternal(prefix)) throw new HttpError(400, "That folder is reserved.");
   const dest = prefix + (rel ? rel + "/" : "");
   const name = sanitizeName(b.name);
 
@@ -38,7 +38,7 @@ async function uploadInit(c, b) {
 }
 
 async function uploadComplete(c, b) {
-  if (!validKey(b.key, "file") || typeof b.uploadId !== "string" || !b.uploadId) throw new HttpError(400, "Invalid request.");
+  if (!validKey(b.key, "file") || isInternal(b.key) || typeof b.uploadId !== "string" || !b.uploadId) throw new HttpError(400, "Invalid request.");
   const parts = Array.isArray(b.parts) ? b.parts : [];
   if (!parts.length || parts.length > 10000) throw new HttpError(400, "Invalid part list.");
   const sorted = parts
@@ -54,7 +54,7 @@ async function uploadComplete(c, b) {
 }
 
 async function deleteFolderBatch(c, prefix) {
-  if (!prefix || !validKey(prefix, "folder")) throw new HttpError(400, "Invalid folder.");
+  if (!prefix || !validKey(prefix, "folder") || isInternal(prefix)) throw new HttpError(400, "Invalid folder.");
   // 1 list call + up to 30 deletes per request keeps us under the Free plan's 50-subrequest cap;
   // the browser repeats this call until nothing is left.
   const res = await r2(c, "GET", "", { query: { "list-type": "2", "max-keys": "30", prefix } });

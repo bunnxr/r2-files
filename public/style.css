@@ -431,3 +431,30 @@ body.selmode #list .sel{display:block}
 .lk-addr{display:flex;align-items:center;gap:6px}
 .lk-addr span{color:var(--muted);font-size:13.5px;white-space:nowrap}
 .lk-addr .field{margin:0;flex:1;min-width:0}
+
+/* ---- Upload password page ---- */
+.upcard{padding:18px 20px 20px}
+.up-note{margin:0 0 16px;color:var(--muted)}
+.up-lbl{display:block;margin:0 0 6px;font-weight:600;font-size:13px}
+.upcard .copyrow{margin-top:0}
+.upcard .field.mono{flex:none;width:11ch;font:600 15px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.06em;background:#fff;box-shadow:0 0 0 1px #dde3ea}
+.upcard .field.mono:focus{box-shadow:0 0 0 2px var(--accent)}
+.up-hint{display:block;margin:8px 0 0;color:var(--muted);font-size:13px}
+.up-next{margin-top:10px;font-weight:600;color:var(--text)}
+.up-row{display:flex;align-items:center;gap:16px;margin-top:20px;padding-top:18px;border-top:1px solid #e6ebf1}
+.up-txt{flex:1;min-width:0}
+.up-txt b{display:block}
+.up-txt small{display:block;color:var(--muted);font-size:13px}
+.up-acts{display:flex;justify-content:flex-end;margin-top:20px}
+.sw{flex:none;width:46px;height:28px;padding:3px;border:0;border-radius:99px;background:#cfd8e3;transition:background .18s var(--ease)}
+.sw i{display:block;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(16,24,40,.3);transition:transform .18s var(--ease)}
+.sw.on{background:var(--accent)}
+.sw.on i{transform:translateX(18px)}
+.sw:disabled{opacity:.6}
+@media(max-width:759px){
+ .upcard{padding:16px}
+ .upcard .copyrow{flex-wrap:wrap}
+ .upcard .field.mono{flex:1 0 100%;width:auto}
+ .upcard .copyrow .btn{flex:1}
+ .up-acts .btn{flex:1}
+}

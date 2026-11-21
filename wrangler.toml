@@ -19,3 +19,21 @@ custom_domain = true
 [[routes]]
 pattern = "r2.bunnxr.com"
 custom_domain = true
+
+# Terminal install scripts: https://upload.bunnxr.com/ serves public/install/upload.sh
+# or upload.ps1, picked from the User-Agent. Deploying creates the DNS record and
+# attaches the hostname to this Worker.
+[[routes]]
+pattern = "upload.bunnxr.com"
+custom_domain = true
+
+# Auto-rotation of the upload password: 04:00 UTC daily. The Worker only rotates
+# when auto-rotate is on and 6 days have passed, so a rotation can land up to
+# 24 hours after the 6-day mark.
+[triggers]
+crons = ["0 4 * * *"]
+
+# Worker logs, visible under the Worker's Observability tab
+[observability]
+enabled = true
+head_sampling_rate = 1

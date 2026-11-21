@@ -3,7 +3,7 @@
 //   https://HOST/<folder>/<file>                 files inside a PUBLIC_FOLDERS folder
 //   https://HOST/<folder>/<file>?e=<unix>&s=<sig>  older signed links (still honoured)
 // The Worker checks the rules, then streams the file from R2 (range requests work, so video seeks).
-import { validKey } from "./util.js";
+import { validKey, isInternal } from "./util.js";
 import { presign, encPath } from "./sigv4.js";
 import { contentDisposition } from "./uploads.js";
 import { lookupLink } from "./links.js";
@@ -80,7 +80,7 @@ export async function servePublic(request, c, url) {
   }
 
   const key = path;
-  if (!validKey(key, "file") || key.startsWith(".trash/") || (key.startsWith(".links/") || key.startsWith(".notes/"))) return plain("Not found", 404);
+  if (!validKey(key, "file") || key.startsWith(".trash/") || isInternal(key)) return plain("Not found", 404);
   const e = url.searchParams.get("e"), s = url.searchParams.get("s");
   const signed = !!(e && s);
   if (signed) {

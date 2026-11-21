@@ -32,7 +32,7 @@
   </aside>
 
   <main>
-    <div class="card searchbar"><span id="searchIco"></span><input id="q" type="search" placeholder="Search the files" autocomplete="off" aria-label="Search the files"></div>
+    <div id="searchBar" class="card searchbar"><span id="searchIco"></span><input id="q" type="search" placeholder="Search the files" autocomplete="off" aria-label="Search the files"></div>
     <div id="resumeNote" class="note card" hidden><span id="resumeText"></span><button id="resumeDiscard" class="btn">Discard</button></div>
     <nav id="crumbs" class="crumbs" aria-label="Breadcrumb" hidden></nav>
     <section id="folderSec" hidden>
@@ -50,6 +50,10 @@
         </div>
       </div>
       <div id="lkList" class="lk-list"></div>
+    </section>
+    <section id="upSec" hidden>
+      <div class="sec-h"><h2>Upload password</h2></div>
+      <div id="upBody" class="card upcard"></div>
     </section>
     <section id="filesSec">
       <div class="sec-h">

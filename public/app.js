@@ -55,7 +55,8 @@ const P = {
   database: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
   folderFill: '<path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  broom: '<path d="M4 20h16M7 20l1-9h8l1 9M10 11V4h4v7"/>'
+  broom: '<path d="M4 20h16M7 20l1-9h8l1 9M10 11V4h4v7"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 8-8 3 3-2 2-2-2-2 2 2 2-3 3-2-2"/>'
 };
 const ico = (n, s) => { const f = /Fill$/.test(n); return '<svg class="i" width="' + (s || 18) + '" height="' + (s || 18) + '" viewBox="0 0 24 24" fill="' + (f ? 'currentColor' : 'none') + '" stroke="' + (f ? 'none' : 'currentColor') + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + P[n] + '</svg>'; };
 const EXT = { image: 'jpg jpeg png gif webp avif svg bmp heic heif ico tif tiff', video: 'mp4 mov m4v webm mkv avi wmv', audio: 'mp3 wav flac aac m4a ogg opus', pdf: 'pdf', archive: 'zip rar 7z tar gz tgz bz2 xz', code: 'js ts jsx tsx json html css py rb go rs java c cpp h php sh sql yml yaml xml md', sheet: 'xls xlsx csv tsv ods numbers', doc: 'doc docx odt rtf txt pages ppt pptx key' };
@@ -124,12 +125,15 @@ $('#upToggle').innerHTML = ico('down', 18);
 $('#upClear').innerHTML = ico('broom', 17);
 
 /* ---------- browsing ---------- */
-const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other', 'trash', 'links'];
-const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash', links: 'Links' };
+const UPV = 'upload-password'; // the settings view: #view=upload-password
+const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other', 'trash', 'links', UPV];
+const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash', links: 'Links', [UPV]: 'Upload password' };
 const CAT = { image: ['Images', '#3b82f6', 'image'], video: ['Videos', '#ef4444', 'video'], audio: ['Audio', '#8b5cf6', 'audio'], doc: ['Documents', '#22a06b', 'doc'], archive: ['Archives', '#f59e0b', 'archive'], other: ['Other', '#64748b', 'file'], trash: ['Trash', '#94a3b8', 'trash'] };
-const NAV = [['', 'Files', 'folder'], ['links', 'Links', 'link'], ['trash', 'Trash', 'trash']];
+const NAV = [['', 'Files', 'folder'], ['links', 'Links', 'link'], ['trash', 'Trash', 'trash'], [UPV, 'Upload password', 'key']];
 S.kind = ''; S.usage = null; S.total = 0; S.shownFolders = [];
 const L = { list: [], shown: [], loading: false, error: '', off: false, seq: 0, activeCount: 0, filter: 'all' }; // Links page
+const U = { loading: false, error: '', password: '', auto: 'off', rotatedAt: 0, draft: null, busy: false, seq: 0 }; // Upload password page
+const SIX_DAYS_MS = 6 * 24 * 60 * 60 * 1000;
 $('#sortDir').innerHTML = ico('sort', 17);
 
 function readRoute() {
@@ -155,6 +159,7 @@ window.addEventListener('hashchange', applyRoute);
 
 async function load(silent) {
   if (S.kind === 'links') { ++S.seq; return loadLinks(silent); }
+  if (S.kind === UPV) { ++S.seq; return loadUpAuth(silent); }
   const seq = ++S.seq;
   if (!silent) { S.loading = true; S.error = ''; render(); }
   try {
@@ -244,6 +249,16 @@ function renderNav() {
 
 function render() {
   renderCrumbs(); renderNav(); applyView();
+  // Settings view: no search, no folders, no sort controls, no file list
+  const up = S.kind === UPV;
+  $('#upSec').hidden = !up;
+  $('#searchBar').hidden = up;
+  if (up) {
+    $('#linksSec').hidden = true; $('#filesSec').hidden = true; $('#folderSec').hidden = true;
+    $('#selbar').hidden = true; $('#trashbar').hidden = true;
+    renderUpAuth();
+    return;
+  }
   const lk = S.kind === 'links';
   $('#linksSec').hidden = !lk; $('#filesSec').hidden = lk;
   $('#q').placeholder = lk ? 'Search links and file names' : 'Search the files';
@@ -1594,6 +1609,113 @@ function openNote(it) {
   $('form', modalEl).onsubmit = (e) => { e.preventDefault(); save(t.value.trim()); };
   modalEl.onclick = (e) => { const x = e.target.closest('[data-x]'); if (!x) return; if (x.dataset.x === 'clear') save(''); else closeModal(); };
 }
+
+/* ---------- upload password (#view=upload-password) ---------- */
+/* The Worker owns the real password: it lives in .system/upload-auth.json in
+   the bucket and is read and written through /api/settings/upload-password,
+   which sits behind the normal Access login. Generate only fills the box;
+   nothing is stored until Save. */
+const PW_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; // 62 characters
+const PW_OK = /^[a-zA-Z0-9]{7}$/;
+/* Same rule as generatePassword() in src/upauth.js: bytes at or above 248
+   (the largest multiple of 62 that fits in a byte) are thrown away, so no
+   character is more likely than any other. */
+function newPassword() {
+  let out = '';
+  const buf = new Uint8Array(16);
+  while (out.length < 7) {
+    crypto.getRandomValues(buf);
+    for (let i = 0; i < buf.length && out.length < 7; i++) {
+      if (buf[i] >= 248) continue;
+      out += PW_ALPHABET[buf[i] % 62];
+    }
+  }
+  return out;
+}
+
+async function loadUpAuth(silent) {
+  const seq = ++U.seq;
+  if (!silent) { U.loading = true; U.error = ''; render(); }
+  try {
+    const d = await api('/api/settings/upload-password');
+    if (seq !== U.seq) return;
+    U.password = d.password || ''; U.auto = d.auto === 'on' ? 'on' : 'off'; U.rotatedAt = Number(d.rotatedAt) || 0;
+    U.draft = null; U.loading = false; U.error = '';
+  } catch (e) {
+    if (seq !== U.seq) return;
+    U.loading = false;
+    if (silent) toast(e.message, 'err'); else U.error = e.message;
+  }
+  render();
+}
+
+function renderUpAuth() {
+  const el = $('#upBody');
+  if (U.loading) { el.innerHTML = '<div class="spin" style="margin:34px auto"></div>'; return; }
+  if (U.error) {
+    el.innerHTML = '<div class="empty"><h3>Could not load the upload password</h3><p>' + esc(U.error) + '</p><button class="btn primary" data-up="retry">Try again</button></div>';
+    return;
+  }
+  const on = U.auto === 'on';
+  const val = U.draft === null ? U.password : U.draft;
+  el.innerHTML =
+    '<p class="up-note">The terminal upload client asks for this password. The web app itself stays behind your Cloudflare Access login.</p>' +
+    '<label class="up-lbl" for="upPass">Password</label>' +
+    '<div class="copyrow">' +
+      '<input id="upPass" class="field mono" maxlength="7" size="7" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" value="' + esc(val) + '" aria-label="Upload password">' +
+      '<button class="btn" data-up="gen">' + ico('retry', 16) + 'Generate</button>' +
+      '<button class="btn" data-up="copy">' + ico('copy', 16) + 'Copy</button>' +
+    '</div>' +
+    '<small class="up-hint">Exactly 7 characters: letters and numbers.</small>' +
+    '<div class="up-row">' +
+      '<div class="up-txt"><b>Auto-rotate every 6 days</b><small>' + (on ? 'A new password is generated for you.' : 'The password never changes on its own.') + '</small></div>' +
+      '<button class="sw' + (on ? ' on' : '') + '" role="switch" aria-checked="' + (on ? 'true' : 'false') + '" data-up="auto" aria-label="Auto-rotate every 6 days"><i></i></button>' +
+    '</div>' +
+    (on ? '<small class="up-hint up-next">Next rotation: ' + esc(U.rotatedAt ? fwhen((U.rotatedAt + SIX_DAYS_MS) / 1000) : 'unknown') + '</small>' : '') +
+    '<div class="up-acts"><button class="btn primary" data-up="save"' + (U.busy ? ' disabled' : '') + '>Save</button></div>';
+}
+
+async function saveUpAuth(patch, msg) {
+  if (U.busy) return;
+  U.busy = true; renderUpAuth();
+  try {
+    const d = await api('/api/settings/upload-password', patch);
+    U.password = d.password || ''; U.auto = d.auto === 'on' ? 'on' : 'off'; U.rotatedAt = Number(d.rotatedAt) || 0;
+    U.draft = null;
+    toast(msg || 'Saved', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+  U.busy = false;
+  renderUpAuth();
+}
+
+$('#upBody').addEventListener('input', (e) => { if (e.target.id === 'upPass') U.draft = e.target.value; });
+$('#upBody').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-up]');
+  if (!b) return;
+  const a = b.dataset.up;
+  if (a === 'retry') { loadUpAuth(); return; }
+  if (a === 'gen') {
+    U.draft = newPassword();
+    renderUpAuth();
+    const inp = $('#upPass'); if (inp) { inp.focus(); inp.select(); }
+    toast('New password ready. Click Save to start using it.', 'info');
+    return;
+  }
+  if (a === 'copy') {
+    const v = (U.draft === null ? U.password : U.draft) || '';
+    if (!v) return;
+    copyText(v).then((ok) => toast(ok ? 'Password copied' : v, ok ? 'ok' : 'info', ok ? 3000 : 9000));
+    return;
+  }
+  if (a === 'auto') { saveUpAuth({ auto: U.auto === 'on' ? 'off' : 'on' }, U.auto === 'on' ? 'Auto-rotate off' : 'Auto-rotate on'); return; }
+  if (a === 'save') {
+    const v = ((U.draft === null ? U.password : U.draft) || '').trim();
+    if (!PW_OK.test(v)) { toast('The password must be exactly 7 characters: letters and numbers only.', 'err'); return; }
+    if (v === U.password) { toast('That is already the password.', 'info'); return; }
+    saveUpAuth({ password: v }, 'Password saved');
+    return;
+  }
+});
 
 /* ---------- start ---------- */
 applyView();

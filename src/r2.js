@@ -1,5 +1,5 @@
 import { presign } from "./sigv4.js";
-import { HttpError, validKey, typeOf } from "./util.js";
+import { HttpError, validKey, typeOf, isInternal } from "./util.js";
 
 // Server-side call to R2 (uses a short-lived presigned URL). Always reads the body.
 async function r2(c, method, key, { query, headers, body } = {}) {
@@ -71,7 +71,7 @@ async function bucketUsage(c) {
   const byType = {};
   let count = 0;
   for (const f of r.files) {
-    if (f.key.endsWith("/") || (f.key.startsWith(".links/") || f.key.startsWith(".notes/"))) continue; // folder markers and internal link records
+    if (f.key.endsWith("/") || isInternal(f.key)) continue; // folder markers and internal link records
     count++;
     const t = typeOf(f.key);
     const e = byType[t] || (byType[t] = { count: 0, size: 0 });

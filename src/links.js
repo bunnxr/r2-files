@@ -4,7 +4,7 @@
 //   .links/n/<name>   name  -> { key, exp }      (used when the link is opened)
 //   .links/k/<hash>   file  -> { name, key, exp } (used to show the current link of a file)
 // exp is a unix time in seconds, or 0 for a link that never expires.
-import { HttpError, validKey, sanitizeName } from "./util.js";
+import { HttpError, validKey, sanitizeName, isInternal } from "./util.js";
 import { r2, r2Error, parseList } from "./r2.js";
 
 const enc = new TextEncoder();
@@ -29,7 +29,7 @@ async function drop(c, obj) { await r2(c, "DELETE", obj); }
 export async function lookupLink(c, name) {
   if (!validKey(nameObj(name), "file")) return null;
   const r = await read(c, nameObj(name));
-  const ok = r && typeof r.key === "string" && validKey(r.key, "file") && !r.key.startsWith(".trash/") && !(r.key.startsWith(".links/") || r.key.startsWith(".notes/"));
+  const ok = r && typeof r.key === "string" && validKey(r.key, "file") && !r.key.startsWith(".trash/") && !isInternal(r.key);
   return ok ? r : null;
 }
 
@@ -89,7 +89,7 @@ const cleanName = (raw) => {
   if (!validKey(nameObj(n), "file") || n.length > 180) throw new HttpError(400, "That link name is not allowed.");
   return n;
 };
-const goodTarget = (k) => validKey(k, "file") && !k.startsWith(".trash/") && !k.startsWith(".links/") && !k.startsWith(".notes/");
+const goodTarget = (k) => validKey(k, "file") && !k.startsWith(".trash/") && !isInternal(k);
 
 // One page of links. 1 list + 2 calls per link keeps a page under the Free plan's 50-subrequest cap.
 export async function listLinks(c, after) {

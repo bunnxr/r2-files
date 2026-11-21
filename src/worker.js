@@ -1,6 +1,6 @@
 // R2 File Manager: Worker entry point (routing). Static files live in /public.
 import { getConfig, configProblems } from "./config.js";
-import { HttpError, json, readJson, safeColor, validKey, validPrefix, sanitizeName, TYPES, typeOf } from "./util.js";
+import { HttpError, json, readJson, safeColor, validKey, validPrefix, sanitizeName, TYPES, typeOf, isInternal, logEvent } from "./util.js";
 import { presign } from "./sigv4.js";
 import { r2, listAll, bucketUsage, r2Error } from "./r2.js";
 import { verifyAccess } from "./access.js";
@@ -11,6 +11,8 @@ import { createLink, linkInfo, removeLink, listLinks, updateLink, deleteLink, ad
 import { readNotes, setNote, dropNotes } from "./notes.js";
 import * as ops from "./fileops.js";
 import { fetchToR2 } from "./urlfetch.js";
+import { readAuth, saveAuth, rotateIfDue } from "./upauth.js";
+import { PREFIX as CLI_PREFIX, serveScript, handleCli } from "./cli.js";
 
 // ---------------------------------------------------------------------
 //  Request router
@@ -20,7 +22,14 @@ async function handle(request, env, ctx) {
   const url = new URL(request.url);
   const isApi = url.pathname.startsWith("/api/");
 
-  const isPublicHost = !!c.PUBLIC_HOST && url.hostname.toLowerCase() === c.PUBLIC_HOST;
+  const host = url.hostname.toLowerCase();
+
+  // The installer host comes first: it only ever serves the two scripts from
+  // /public/install, needs no R2 and no login, so it answers even while the
+  // CONFIG block is still incomplete.
+  if (c.UPLOAD_HOST && host === c.UPLOAD_HOST) return serveScript(request, env, url);
+
+  const isPublicHost = !!c.PUBLIC_HOST && host === c.PUBLIC_HOST;
   const problems = configProblems(c);
   if (problems.length) {
     if (isPublicHost) return new Response("Not configured yet.", { status: 503 });
@@ -28,6 +37,10 @@ async function handle(request, env, ctx) {
   }
   // The public hostname only ever serves files (public folders and signed share links): no UI, no API, no login
   if (isPublicHost) return servePublic(request, c, url);
+
+  // Terminal routes: protected by the upload password instead of Access
+  // (Access has a bypass policy for /cli/*), so they run before verifyAccess.
+  if (url.pathname.startsWith(CLI_PREFIX)) return handleCli(request, env, c, ctx, url);
 
   if (!(await verifyAccess(request, c))) {
     return isApi ? json({ error: "Access denied." }, 403) : new Response("Access denied", { status: 403 });
@@ -57,9 +70,9 @@ async function handle(request, env, ctx) {
   switch (request.method + " " + url.pathname) {
     case "GET /api/list": {
       const prefix = url.searchParams.get("prefix") ?? "";
-      if (!validPrefix(prefix)) throw new HttpError(400, "Invalid folder path.");
+      if (!validPrefix(prefix) || isInternal(prefix)) throw new HttpError(400, "Invalid folder path.");
       const r = await listAll(c, { prefix, delimiter: "/", maxPages: 20 });
-      return json({ prefix, folders: r.folders.filter((f) => f !== ".trash/" && f !== ".links/" && f !== ".notes/"), files: r.files.filter((f) => f.key !== prefix), truncated: r.truncated });
+      return json({ prefix, folders: r.folders.filter((f) => f !== ".trash/" && !isInternal(f)), files: r.files.filter((f) => f.key !== prefix && !isInternal(f.key)), truncated: r.truncated });
     }
     case "GET /api/config":
       return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0d6efd"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW, publicHost: c.PUBLIC_HOST, publicFolders: c.PUBLIC_FOLDER_LIST, trashDays: c.TRASH_DAYS });
@@ -71,7 +84,7 @@ async function handle(request, env, ctx) {
       const type = url.searchParams.get("type") || "recent";
       if (type !== "recent" && !TYPES.includes(type)) throw new HttpError(400, "Unknown file type.");
       const u = await bucketUsage(c);
-      const all = u.files.filter((f) => !f.key.endsWith("/") && (type === "recent" ? typeOf(f.key) !== "trash" : typeOf(f.key) === type) && !(f.key.startsWith(".links/") || f.key.startsWith(".notes/")));
+      const all = u.files.filter((f) => !f.key.endsWith("/") && (type === "recent" ? typeOf(f.key) !== "trash" : typeOf(f.key) === type) && !isInternal(f.key));
       all.sort((a, z) => (a.modified < z.modified ? 1 : a.modified > z.modified ? -1 : 0));
       const limit = type === "recent" ? 100 : 500;
       return json({ type, total: all.length, files: all.slice(0, limit), truncated: all.length > limit || u.partial });
@@ -79,7 +92,7 @@ async function handle(request, env, ctx) {
     case "POST /api/mkdir": {
       const b = await readJson(request);
       const prefix = typeof b.prefix === "string" ? b.prefix : "";
-      if (!validPrefix(prefix)) throw new HttpError(400, "Invalid folder path.");
+      if (!validPrefix(prefix) || isInternal(prefix)) throw new HttpError(400, "Invalid folder path.");
       const key = prefix + sanitizeName(b.name) + "/";
       if (!validKey(key, "folder")) throw new HttpError(400, "That folder name is not allowed.");
       const res = await r2(c, "PUT", key, { body: "" });
@@ -91,22 +104,31 @@ async function handle(request, env, ctx) {
     case "POST /api/upload/part": {
       const b = await readJson(request);
       const n = Number(b.partNumber);
-      if (!validKey(b.key, "file") || typeof b.uploadId !== "string" || !b.uploadId || !Number.isInteger(n) || n < 1 || n > 10000) {
+      if (!validKey(b.key, "file") || isInternal(b.key) || typeof b.uploadId !== "string" || !b.uploadId || !Number.isInteger(n) || n < 1 || n > 10000) {
         throw new HttpError(400, "Invalid request.");
       }
       return json({ url: await presign(c, "PUT", b.key, { query: { partNumber: String(n), uploadId: b.uploadId } }) });
     }
-    case "POST /api/upload/complete":
-      return json(await uploadComplete(c, await readJson(request)));
+    case "POST /api/upload/complete": {
+      const b = await readJson(request);
+      try {
+        const r = await uploadComplete(c, b);
+        logEvent("upload.complete", { key: r.key, size: Number(b.size) || null, via: "web" });
+        return json(r);
+      } catch (e) {
+        logEvent("upload.error", { key: typeof b.key === "string" ? b.key : "", via: "web", error: String(e && e.message ? e.message : e) });
+        throw e;
+      }
+    }
     case "POST /api/upload/abort": {
       const b = await readJson(request);
-      if (!validKey(b.key, "file") || typeof b.uploadId !== "string" || !b.uploadId) throw new HttpError(400, "Invalid request.");
+      if (!validKey(b.key, "file") || isInternal(b.key) || typeof b.uploadId !== "string" || !b.uploadId) throw new HttpError(400, "Invalid request.");
       await r2(c, "DELETE", b.key, { query: { uploadId: b.uploadId } });
       return json({ ok: true });
     }
     case "POST /api/delete": {
       const b = await readJson(request);
-      if (!validKey(b.key, "file")) throw new HttpError(400, "Invalid file.");
+      if (!validKey(b.key, "file") || isInternal(b.key)) throw new HttpError(400, "Invalid file.");
       const res = await r2(c, "DELETE", b.key);
       if (!res.ok && res.status !== 404) throw new HttpError(502, r2Error(res));
       await dropNotes(c, [b.key]);
@@ -116,37 +138,37 @@ async function handle(request, env, ctx) {
       return json(await deleteFolderBatch(c, (await readJson(request)).prefix));
     case "POST /api/url": {
       const b = await readJson(request);
-      if (!validKey(b.key, "file")) throw new HttpError(400, "Invalid file.");
+      if (!validKey(b.key, "file") || isInternal(b.key)) throw new HttpError(400, "Invalid file.");
       const u = await presign(c, "GET", b.key, { query: { "response-content-disposition": contentDisposition(b.mode, b.key) } });
       return json({ url: u, expiresIn: c.URL_EXPIRY_SECONDS });
     }
     case "POST /api/share": {
       const b = await readJson(request);
       const seconds = Math.floor(Number(b.seconds));
-      if (!validKey(b.key, "file") || b.key.startsWith(".trash/")) throw new HttpError(400, "Invalid file.");
+      if (!validKey(b.key, "file") || b.key.startsWith(".trash/") || isInternal(b.key)) throw new HttpError(400, "Invalid file.");
       if (!(seconds >= 60 && seconds <= 604800)) throw new HttpError(400, "Links can last between 1 minute and 7 days.");
       return json(await shareUrl(c, b.key, seconds));
     }
     case "GET /api/read": {
       const key = url.searchParams.get("key");
-      if (!validKey(key, "file") || (key.startsWith(".links/") || key.startsWith(".notes/"))) throw new HttpError(400, "Invalid file.");
+      if (!validKey(key, "file") || isInternal(key)) throw new HttpError(400, "Invalid file.");
       return proxyRead(c, request, key);
     }
     case "POST /api/link": {
       const b = await readJson(request);
       const seconds = Math.floor(Number(b.seconds));
-      if (!validKey(b.key, "file") || b.key.startsWith(".trash/") || (b.key.startsWith(".links/") || b.key.startsWith(".notes/"))) throw new HttpError(400, "Invalid file.");
+      if (!validKey(b.key, "file") || b.key.startsWith(".trash/") || isInternal(b.key)) throw new HttpError(400, "Invalid file.");
       if (!(seconds === 0 || (seconds >= 60 && seconds <= 604800))) throw new HttpError(400, "Choose a link length of up to 7 days, or never.");
       return json(await createLink(c, b.key, seconds));
     }
     case "POST /api/link-info": {
       const b = await readJson(request);
-      if (!validKey(b.key, "file")) throw new HttpError(400, "Invalid file.");
+      if (!validKey(b.key, "file") || isInternal(b.key)) throw new HttpError(400, "Invalid file.");
       return json(c.PUBLIC_HOST ? await linkInfo(c, b.key) : { exists: false });
     }
     case "POST /api/link-remove": {
       const b = await readJson(request);
-      if (!validKey(b.key, "file")) throw new HttpError(400, "Invalid file.");
+      if (!validKey(b.key, "file") || isInternal(b.key)) throw new HttpError(400, "Invalid file.");
       return json(await removeLink(c, b.key));
     }
     case "GET /api/links":
@@ -161,14 +183,14 @@ async function handle(request, env, ctx) {
       return json({ notes: await readNotes(c) });
     case "POST /api/note": {
       const b = await readJson(request);
-      if (!validKey(b.key, "file") || b.key.startsWith(".notes/") || b.key.startsWith(".links/")) throw new HttpError(400, "Invalid file.");
+      if (!validKey(b.key, "file") || isInternal(b.key)) throw new HttpError(400, "Invalid file.");
       return json(await setNote(c, b.key, b.text));
     }
     case "POST /api/new-text":
       return json(await ops.newText(c, await readJson(request)));
     case "GET /api/largest": {
       const u = await bucketUsage(c);
-      const files = u.files.filter((f) => !f.key.endsWith("/") && !(f.key.startsWith(".links/") || f.key.startsWith(".notes/"))).sort((a, z) => z.size - a.size).slice(0, 25).map((f) => ({ key: f.key, size: f.size, modified: f.modified }));
+      const files = u.files.filter((f) => !f.key.endsWith("/") && !isInternal(f.key)).sort((a, z) => z.size - a.size).slice(0, 25).map((f) => ({ key: f.key, size: f.size, modified: f.modified }));
       return json({ files, partial: u.partial });
     }
     case "POST /api/move":
@@ -187,12 +209,41 @@ async function handle(request, env, ctx) {
       return json(await ops.listParts(c, await readJson(request)));
     case "POST /api/fetch-url":
       return fetchToR2(c, ctx, await readJson(request));
+    // Upload-password settings. Behind the normal Access login, like every
+    // other /api/ route: these never accept the CLI password.
+    case "GET /api/settings/upload-password": {
+      const a = await readAuth(c);
+      return json({ password: a.password, auto: a.auto, rotatedAt: a.rotatedAt });
+    }
+    case "POST /api/settings/upload-password": {
+      const b = await readJson(request);
+      const patch = {};
+      if (b.password !== undefined) patch.password = String(b.password);
+      if (b.auto !== undefined) patch.auto = String(b.auto);
+      if (!Object.keys(patch).length) throw new HttpError(400, "Nothing to save.");
+      const a = await saveAuth(c, patch);
+      return json({ password: a.password, auto: a.auto, rotatedAt: a.rotatedAt });
+    }
     default:
       return json({ error: "Not found." }, 404);
   }
 }
 
 export default {
+  // Cron (see [triggers] in wrangler.toml). Rotation happens on the first run
+  // at or after the 6-day mark, so it can be up to 24 hours late.
+  async scheduled(event, env, ctx) {
+    try {
+      const c = getConfig(env);
+      const problems = configProblems(c);
+      if (problems.length) { logEvent("cron.run", { decision: "skipped", reason: "not configured yet" }); return; }
+      await rotateIfDue(c);
+    } catch (e) {
+      console.error("[file-manager] cron", e && e.stack ? e.stack : e);
+      logEvent("cron.run", { decision: "skipped", reason: "error", error: String(e && e.message ? e.message : e) });
+    }
+  },
+
   async fetch(request, env, ctx) {
     try {
       return await handle(request, env, ctx);

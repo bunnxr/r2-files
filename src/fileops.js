@@ -1,6 +1,6 @@
 // Move, copy, trash, restore, save-text and multipart helpers. R2 has no rename or move,
 // so every move is "copy, then delete" using the S3 API.
-import { HttpError, validKey, validPrefix, sanitizeName } from "./util.js";
+import { HttpError, validKey, validPrefix, sanitizeName, isInternal } from "./util.js";
 import { r2, xmlEsc, xmlTag, r2Error, parseList, uniqueKey } from "./r2.js";
 import { encPath } from "./sigv4.js";
 import { carryNotes, dropNotes } from "./notes.js";
@@ -15,7 +15,7 @@ const items = (v, max) => {
 };
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 const okId = (s) => typeof s === "string" && /^[a-z0-9]{4,20}$/.test(s);
-const fileKey = (k) => validKey(k, "file") && !k.startsWith(".trash/") && !(k.startsWith(".links/") || k.startsWith(".notes/"));
+const fileKey = (k) => validKey(k, "file") && !k.startsWith(".trash/") && !isInternal(k);
 
 async function remove(c, key) {
   const res = await r2(c, "DELETE", key);
@@ -66,7 +66,7 @@ async function moveOne(c, key, destFolder, mode) {
 export async function moveBatch(c, b) {
   const keys = items(b.keys, 8);
   const dest = typeof b.dest === "string" ? b.dest : "";
-  if (!validPrefix(dest) || dest.startsWith(".trash/") || (dest.startsWith(".links/") || dest.startsWith(".notes/"))) throw new HttpError(400, "Invalid destination folder.");
+  if (!validPrefix(dest) || dest.startsWith(".trash/") || isInternal(dest)) throw new HttpError(400, "Invalid destination folder.");
   const mode = b.mode === "copy" ? "copy" : "move";
   const out = { done: [], errors: [] }, pairs = [];
   for (const key of keys) {
@@ -98,7 +98,7 @@ export async function trashBatch(c, b) {
 // One step of "delete folder": the browser repeats this until nothing is left
 export async function trashFolderBatch(c, b) {
   const prefix = b.prefix;
-  if (!validKey(prefix, "folder") || prefix.startsWith(".trash/")) throw new HttpError(400, "Invalid folder.");
+  if (!validKey(prefix, "folder") || prefix.startsWith(".trash/") || isInternal(prefix)) throw new HttpError(400, "Invalid folder.");
   const id = okId(b.id) ? b.id : newId();
   const res = await r2(c, "GET", "", { query: { "list-type": "2", "max-keys": "12", prefix } });
   if (!res.ok) throw new HttpError(502, r2Error(res));
@@ -155,7 +155,7 @@ export async function saveText(c, b) {
 
 // Which chunks of an unfinished multipart upload R2 already has (used to resume uploads)
 export async function listParts(c, b) {
-  if (!validKey(b.key, "file") || typeof b.uploadId !== "string" || !b.uploadId) throw new HttpError(400, "Invalid request.");
+  if (!validKey(b.key, "file") || isInternal(b.key) || typeof b.uploadId !== "string" || !b.uploadId) throw new HttpError(400, "Invalid request.");
   const parts = [];
   let marker = 0;
   for (let i = 0; i < 10; i++) {
@@ -172,7 +172,7 @@ export async function listParts(c, b) {
 // "New text file": creates a file that does not exist yet (never overwrites)
 export async function newText(c, b) {
   const prefix = typeof b.prefix === "string" ? b.prefix : "";
-  if (!validPrefix(prefix) || prefix.startsWith(".trash/") || (prefix.startsWith(".links/") || prefix.startsWith(".notes/"))) throw new HttpError(400, "Invalid folder.");
+  if (!validPrefix(prefix) || prefix.startsWith(".trash/") || isInternal(prefix)) throw new HttpError(400, "Invalid folder.");
   let name = sanitizeName(b.name);
   if (!name.includes(".")) name += ".txt";
   const body = new TextEncoder().encode(typeof b.text === "string" ? b.text : "");

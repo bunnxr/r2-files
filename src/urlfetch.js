@@ -1,6 +1,6 @@
 // "Upload from URL": the Worker downloads a link and streams it into R2 as a multipart upload.
 // Progress is sent back to the browser as newline-delimited JSON.
-import { HttpError, validPrefix, sanitizeName } from "./util.js";
+import { HttpError, validPrefix, sanitizeName, isInternal } from "./util.js";
 import { r2, xmlEsc, xmlTag, r2Error, uniqueKey } from "./r2.js";
 
 const MiB = 1024 ** 2;
@@ -33,7 +33,7 @@ function nameFor(u, res, wanted) {
 export function fetchToR2(c, ctx, b) {
   const u = checkUrl(b.url);
   const prefix = typeof b.prefix === "string" ? b.prefix : "";
-  if (!validPrefix(prefix) || prefix.startsWith(".trash/") || (prefix.startsWith(".links/") || prefix.startsWith(".notes/"))) throw new HttpError(400, "Invalid destination folder.");
+  if (!validPrefix(prefix) || prefix.startsWith(".trash/") || isInternal(prefix)) throw new HttpError(400, "Invalid destination folder.");
 
   const { readable, writable } = new TransformStream();
   const w = writable.getWriter();

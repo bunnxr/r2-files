@@ -29,6 +29,7 @@ const CONFIG = {
   // ---- Public and share links
   PUBLIC_HOST: "r2.bunnxr.com",     // hostname that serves public files and expiring share links. Attach it to THIS Worker (not to the bucket). Empty = use plain R2 signed links instead
   PUBLIC_FOLDERS: "public/",        // comma-separated folders whose files anyone can open at https://PUBLIC_HOST/<path>
+  UPLOAD_HOST: "upload.bunnxr.com", // hostname that serves the terminal install scripts (no login, no secrets). Empty = off
   TRASH_DAYS: 30,                   // shown in the UI; use the same number in the R2 lifecycle rule for ".trash/"
 
   // ---- Look and feel
@@ -61,6 +62,7 @@ function getConfig(env) {
   c.URL_EXPIRY_SECONDS = Math.min(604800, Math.max(60, Math.floor(c.URL_EXPIRY_SECONDS)));
   c.DEFAULT_VIEW = c.DEFAULT_VIEW === "list" ? "list" : "grid";
   c.PUBLIC_HOST = c.PUBLIC_HOST.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  c.UPLOAD_HOST = c.UPLOAD_HOST.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
   c.PUBLIC_FOLDER_LIST = c.PUBLIC_FOLDERS.split(",").map((p) => p.trim().replace(/^\/+/, "")).filter((p) => p && !p.startsWith(".trash")).map((p) => p.replace(/\/*$/, "/"));
   return c;
 }

@@ -57,6 +57,27 @@ function sanitizeName(raw) {
 }
 
 
+// ---------------------------------------------------------------------
+//  Hidden housekeeping prefixes
+//  Objects under these are never listed and can never be moved, copied,
+//  deleted, trashed, shared or written through the API or the public host.
+//    .links/   short-link records      .notes/  per-file notes
+//    .system/  settings (upload password)
+// ---------------------------------------------------------------------
+const INTERNAL = [".links/", ".notes/", ".system/"];
+const isInternal = (k) => typeof k === "string" && INTERNAL.some((p) => k.startsWith(p));
+
+// ---------------------------------------------------------------------
+//  Structured logging for Cloudflare Observability
+//  One JSON object per line so the dashboard can filter on `event`,
+//  e.g.  event:cli.verify.fail
+// ---------------------------------------------------------------------
+function logEvent(event, fields) {
+  try {
+    console.log(JSON.stringify(Object.assign({ event, time: new Date().toISOString() }, fields || {})));
+  } catch (e) { /* logging must never break a request */ }
+}
+
 // File categories (used for the storage breakdown and the sidebar views)
 const TYPE_EXT = {
   image: "jpg jpeg png gif webp avif svg bmp heic heif ico tif tiff",
@@ -75,4 +96,4 @@ function typeOf(key) {
   return "other";
 }
 
-export { TYPES, typeOf, HttpError, escHtml, safeColor, json, readJson, fmtBytes, validKey, validPrefix, sanitizeName };
+export { TYPES, typeOf, HttpError, escHtml, safeColor, json, readJson, fmtBytes, validKey, validPrefix, sanitizeName, INTERNAL, isInternal, logEvent };
