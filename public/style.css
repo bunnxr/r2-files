@@ -1,5 +1,6 @@
+@font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url(/fonts/inter-latin-var.woff2) format("woff2")} /* Inter, SIL Open Font License: public/fonts/Inter-LICENSE.txt */
 :root{--accent:#0f766e;--bg:#faf8f4;--card:#fff;--text:#1f2937;--muted:#6b6f69;--border:#e8e7e4;--hover:#f3f3f2;--zebra:#f7f7f6;--shadow:0 1px 3px rgba(16,24,40,.07);--danger:#d92d20;--overlay:rgba(15,23,42,.45);color-scheme:light}
-:root{--font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;--ease:cubic-bezier(.2,.8,.2,1)}
+:root{--font:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;--ease:cubic-bezier(.2,.8,.2,1)}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
@@ -332,9 +333,11 @@ body{background:var(--bg)}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* ---- flatter icons, New button, usage card, menus ---- */
-.tile{background:var(--c,#94a3b8);color:#fff;border-radius:9px}
+.tile{background:transparent;color:var(--c,#9aa09a);border-radius:0}
+.tile .pg{stroke:#a7aba5}
+.tile .mk{stroke:var(--c,#9aa09a)}
 .tile.fold{background:transparent;color:var(--c)}
-.tile.sk{background:var(--hover)}
+.tile.sk{background:var(--hover);border-radius:10px}
 .newbtn{height:46px;border-radius:12px;font-size:15px;box-shadow:0 6px 16px -8px var(--accent)}
 .navcard .nav{margin-top:14px}
 .fab{border:0;cursor:pointer}
@@ -462,3 +465,9 @@ body.selmode #list .sel{display:block}
 /* Storage is the last menu item (built in renderNav), styled by the .nav a rules above */
 .nav .usage{cursor:pointer}
 .nav .usage em{color:var(--text);font-weight:600}
+/* ---- type: Inter, set a little tighter like medium.com ---- */
+body{font-feature-settings:"cv11","ss03";letter-spacing:-.006em}
+h1,h2,h3,.brand h1,.crumbs,.sec-h h2,.dlg h2{letter-spacing:-.018em}
+.brand h1{font-weight:650}
+.crumbs .cur{font-weight:650}
+b,strong{font-weight:600}
