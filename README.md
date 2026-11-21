@@ -50,7 +50,7 @@ Each upload shows one line that redraws in place: a bar and percentage, bytes se
 The terminal client is protected by a password, separate from the Cloudflare Access login that guards the web app.
 
 - Manage it in the app: **Upload password** in the sidebar, or `#view=upload-password`.
-- Format: `a-z`, `A-Z` and `0-9`. **Generate** always makes 7 characters; a password typed in by hand may be 7 to 15 characters.
+- Format: `a-z`, `A-Z` and `0-9`. **Generate** always makes 7 characters; a password typed in by hand may be 7 to 24 characters.
 - **Generate** fills the box with a new password; nothing changes until **Save** is clicked. **Copy** puts the value on the clipboard.
 - **Auto-rotate every 6 days** is off by default, so the password never changes on its own. Switched on, it saves immediately and a **Next rotation** date appears below the toggle.
 - It is stored as a small JSON object at `.system/upload-auth.json` **in the R2 bucket** — not in KV, not as a Worker secret and not in git. The Worker creates it the first time it is needed. `.system/` is hidden from the file manager and every move, copy, delete, trash, share and save route refuses keys under it.

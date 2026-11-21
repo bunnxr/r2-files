@@ -37,8 +37,8 @@ function generatePassword() {
   return out;
 }
 
-// Generated passwords are 7 characters; one typed in by hand may be 7 to 15.
-const validPassword = (p) => typeof p === "string" && /^[a-zA-Z0-9]{7,15}$/.test(p);
+// Generated passwords are 7 characters; one typed in by hand may be 7 to 24.
+const validPassword = (p) => typeof p === "string" && /^[a-zA-Z0-9]{7,24}$/.test(p);
 
 // Workers have no crypto.timingSafeEqual, so compare by hand without an early exit.
 function safeEqual(a, b) {
@@ -89,7 +89,7 @@ async function saveAuth(c, { password, auto }) {
   const cur = await readAuth(c);
   const next = { password: cur.password, auto: cur.auto, rotatedAt: cur.rotatedAt };
   if (password !== undefined) {
-    if (!validPassword(password)) throw new HttpError(400, "The password must be 7 to 15 characters: letters and numbers only.");
+    if (!validPassword(password)) throw new HttpError(400, "The password must be 7 to 24 characters: letters and numbers only.");
     if (password !== cur.password) { next.password = password; next.rotatedAt = Date.now(); }
   }
   if (auto !== undefined) {
