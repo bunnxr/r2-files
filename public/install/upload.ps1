@@ -416,7 +416,12 @@ function Show-Usage {
 function Start-Prompt {
   while ($true) {
     Say ''
-    $line = Read-Host -Prompt 'upload'
+    # A bash-style prompt: root@CHARLie:~#
+    Write-Host 'root@CHARLie' -NoNewline -ForegroundColor Green
+    Write-Host ':' -NoNewline
+    Write-Host '~' -NoNewline -ForegroundColor Blue
+    Write-Host '# ' -NoNewline
+    $line = Read-Host
     if ($null -eq $line) { return }
     $line = $line.Trim()
     if ($line -eq '') { continue }
@@ -474,7 +479,7 @@ $banner = @'
 
 '@
 Write-Host $banner -ForegroundColor Cyan
-Say 'r2 by bunnxr: terminal upload'
+Say 'root@CHARLie:~# terminal parser'
 Say $Script:Api
 
 try {
