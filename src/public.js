@@ -85,7 +85,7 @@ const TAB_TWITCH = "(function(){var l=document.querySelector('link[rel=icon]');i
   "function ic(a){return 'data:image/svg+xml,'+encodeURIComponent(\"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='\"+(dk.matches?'#4fd1bf':'#0f766e')+\"' stroke-width='3.2' stroke-linecap='round'><path d='M15 24C9 14 11 3 16 4C20 5 19 15 19 24'/><path transform='rotate(\"+a+\" 25.2 24)' d='M25 24C31 14 29 3 24 4C20 5 21 15 21 24'/><rect x='9' y='24' width='22' height='11' rx='5.5'/></svg>\")}" +
   "var K=[[0,0],[210,11],[420,-4],[700,0]];function ang(t){for(var i=1;i<K.length;i++)if(t<=K[i][0])return K[i-1][1]+(K[i][1]-K[i-1][1])*(t-K[i-1][0])/(K[i][0]-K[i-1][0]);return 0}" +
   "function tw(){var s=performance.now();(function f(){var t=performance.now()-s;l.href=ic(ang(t).toFixed(1));if(t<700)setTimeout(f,40)})()}" +
-  "l.href=ic(0);dk.addEventListener('change',function(){l.href=ic(0)});setTimeout(function lp(){tw();setTimeout(lp,7000)},2500)})();";
+  "l.href=ic(0);dk.addEventListener('change',function(){l.href=ic(0)});setTimeout(function lp(){tw();setTimeout(lp,3000)},1000)})();";
 
 // Sub-requests a view-only file may be loaded by (from the viewer page). "empty" covers the
 // follow-up range requests some built-in viewers make (e.g. large PDFs).

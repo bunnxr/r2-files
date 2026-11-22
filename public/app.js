@@ -1494,7 +1494,7 @@ function doNew(a) { if (a === 'upload') $('#file').click(); else if (a === 'uplo
 async function openNew(x, y) { const a = await showMenu('Create or upload', newRows(), x, y); if (a) doNew(a); }
 /* --- tab icon: Chrome and Edge do not play animations inside tab icons, so the bunny's ear twitch is played
    here by swapping the icon frame by frame. Same bunny as public/index.html, same timing as the header logo
-   (a twitch every 7 s: 0° → 11° → -4° → 0° over 0.7 s). Off when the system asks for reduced motion. --- */
+   (a twitch every 3 s: 0° → 11° → -4° → 0° over 0.7 s). Off when the system asks for reduced motion. --- */
 (function tabBunny() {
   const link = document.querySelector('link[rel="icon"]');
   if (!link || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -1505,7 +1505,7 @@ async function openNew(x, y) { const a = await showMenu('Create or upload', newR
   const twitch = () => { const start = performance.now(); const tick = () => { const t = performance.now() - start; link.href = icon(angle(t).toFixed(1)); if (t < 700) setTimeout(tick, 40); }; tick(); };
   link.href = icon(0);
   dark.addEventListener('change', () => { link.href = icon(0); });
-  setTimeout(function loop() { twitch(); setTimeout(loop, 7000); }, 2500);
+  setTimeout(function loop() { twitch(); setTimeout(loop, 3000); }, 1000);
 })();
 
 $('#btnNew').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(); openNew(r.left, r.bottom + 6); };
