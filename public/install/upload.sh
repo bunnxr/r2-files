@@ -2,7 +2,7 @@
 # =====================================================================
 #  r2 by bunnxr: terminal upload client (macOS, Linux, Git Bash, WSL)
 #
-#  Run it with:   curl -fsSL https://upload.bunnxr.com | bash
+#  Run it with:   curl -fsSL https://u.bunnxr.com | bash
 #
 #  Nothing is installed and nothing is written to this computer: no copy
 #  of this script, no config file, no temporary files. Each chunk is read

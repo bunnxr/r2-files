@@ -1,7 +1,7 @@
 # =====================================================================
 #  r2 by bunnxr: terminal upload client (Windows PowerShell)
 #
-#  Run it with:   irm https://upload.bunnxr.com | iex
+#  Run it with:   irm https://u.bunnxr.com | iex
 #
 #  Nothing is installed and nothing is written to this computer: no copy
 #  of this script, no config file, no temporary files. Each chunk is read

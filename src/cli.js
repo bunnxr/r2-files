@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------
 //  Terminal client: the one-URL installer host and the /cli/* routes.
 //
-//  https://upload.bunnxr.com/        serves public/install/upload.sh or
+//  https://u.bunnxr.com/             serves public/install/upload.sh or
 //                                    upload.ps1, picked from the User-Agent.
 //  https://files.bunnxr.com/cli/*    the upload routes the script calls.
 //                                    Every one needs the upload password as

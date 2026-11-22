@@ -15,7 +15,7 @@ A Cloudflare Worker that serves a file manager for an R2 bucket. Uploads go stra
 - `src/public.js`: everything served on the public hostname
 - `src/access.js`: optional Cloudflare Access token check
 - `src/upauth.js`: the upload password (stored in R2), generation and rotation
-- `src/cli.js`: the `upload.bunnxr.com` script host and the `/cli/*` routes
+- `src/cli.js`: the `u.bunnxr.com` script host and the `/cli/*` routes
 - `src/pages.js`: security headers and the "Not configured yet" page
 - `public/`: `index.html`, `style.css`, `app.js`, `zip.js`, `sw.js`
 - `public/install/`: `upload.sh` and `upload.ps1`, the terminal clients
@@ -26,10 +26,10 @@ A Cloudflare Worker that serves a file manager for an R2 bucket. Uploads go stra
 One command, no install, nothing left behind on the machine:
 
     # Linux, macOS, Git Bash or WSL
-    curl -fsSL https://upload.bunnxr.com | bash
+    curl -fsSL https://u.bunnxr.com | bash
 
     # Windows PowerShell
-    irm https://upload.bunnxr.com | iex
+    irm https://u.bunnxr.com | iex
 
 Both hit the same URL; the Worker picks the script from the request's User-Agent. The script asks for the upload password with hidden input, checks it against `POST /cli/verify`, then offers a prompt:
 
@@ -61,7 +61,7 @@ The terminal client is protected by a password, separate from the Cloudflare Acc
 | --- | --- |
 | `files.bunnxr.com` | the web app and `/api/*`, behind **Cloudflare Access** (SSO) |
 | `files.bunnxr.com/cli/*` | **upload password** (`Authorization: Bearer <password>`), with an Access bypass policy on the path |
-| `upload.bunnxr.com` | the two install scripts, **no login and no secrets**; any path other than `/` returns 404 |
+| `u.bunnxr.com` | the two install scripts, **no login and no secrets**; any path other than `/` returns 404 |
 | `r2.bunnxr.com` | public files and expiring share links |
 
 The `/cli/*` routes are `verify`, `upload/init`, `upload/part`, `upload/complete`, `upload/abort`, `upload/parts` and `fetch-url`, all POST. There is deliberately no delete, move, trash, share, list or settings route among them: the password can add files, never remove or read them. The password is checked before the request body is read, and never logged. `/api/*` keeps its Access protection and never accepts the CLI password.

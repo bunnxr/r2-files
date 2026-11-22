@@ -32,7 +32,7 @@ const CONFIG = {
   LINK_HOST: "bunnxr.com",          // hostname used in short links (bunnxr.com/gta6.mp4). It belongs to the shortener Worker, which hands
                                     // names it does not know to this Worker through a service binding. Links also keep working on PUBLIC_HOST.
                                     // Empty = short links use PUBLIC_HOST
-  UPLOAD_HOST: "upload.bunnxr.com", // hostname that serves the terminal install scripts (no login, no secrets). Empty = off
+  UPLOAD_HOST: "u.bunnxr.com", // hostname that serves the terminal install scripts (no login, no secrets). Empty = off
   TRASH_DAYS: 30,                   // shown in the UI; use the same number in the R2 lifecycle rule for ".trash/"
 
   // ---- Look and feel
