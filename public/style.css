@@ -484,12 +484,12 @@ b,strong{font-weight:600}
 .brand h1 b{color:var(--accent);font-weight:400;animation:blink 1.1s steps(1) infinite}
 @keyframes blink{50%{opacity:0}}
 @media(prefers-reduced-motion:reduce){.brand h1 b{animation:none}}
-/* ---- logo: the bunny from the shortener; draws in on load, the right ear twitches every 3 s (in step with the tab icon) ---- */
+/* ---- logo: the bunny from the shortener; draws in on load, the right ear twitches every 5 s ---- */
 .logo svg{display:block;overflow:visible}
 .logo .d{stroke-dasharray:1;stroke-dashoffset:1;animation:bunnyDraw 1.1s .1s cubic-bezier(.6,0,.2,1) forwards}
-.logo .ear{transform-box:fill-box;transform-origin:50% 100%;animation:bunnyDraw 1.1s .1s cubic-bezier(.6,0,.2,1) forwards,bunnyTwitch 3s 1.2s infinite}
+.logo .ear{transform-box:fill-box;transform-origin:50% 100%;animation:bunnyDraw 1.1s .1s cubic-bezier(.6,0,.2,1) forwards,bunnyTwitch 5s 1.2s infinite}
 @keyframes bunnyDraw{to{stroke-dashoffset:0}}
-@keyframes bunnyTwitch{0%,77%,100%{transform:rotate(0)}84%{transform:rotate(11deg)}91%{transform:rotate(-4deg)}}
+@keyframes bunnyTwitch{0%,86%,100%{transform:rotate(0)}90.2%{transform:rotate(11deg)}94.4%{transform:rotate(-4deg)}}
 @media(prefers-reduced-motion:reduce){.logo .d,.logo .ear{animation:none;stroke-dashoffset:0}}
 /* ---- desktop: use the full window width, sidebar pinned to the left edge (no centred column) ---- */
 @media(min-width:900px){

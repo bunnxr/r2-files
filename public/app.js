@@ -1493,13 +1493,13 @@ const newRows = () => [['upload', 'upload', 'Upload files'], ['uploadDir', 'fold
 function doNew(a) { if (a === 'upload') $('#file').click(); else if (a === 'uploadDir') $('#folderInput').click(); else if (a === 'folder') newFolder(); else if (a === 'text') newTextFile(); else if (a === 'zip') newZipFile(); else if (a === 'url') uploadFromUrl(); }
 async function openNew(x, y) { const a = await showMenu('Create or upload', newRows(), x, y); if (a) doNew(a); }
 /* --- tab icon: Chrome and Edge do not play animations inside tab icons, so the bunny's ear twitch is played
-   here by swapping the icon frame by frame. Same bunny as public/index.html, same timing as the header logo
+   here by swapping the icon frame by frame. Same bunny as public/index.html (header logo twitches every 5 s)
    (a twitch every 3 s: 0° → 11° → -4° → 0° over 0.7 s). Off when the system asks for reduced motion. --- */
 (function tabBunny() {
   const link = document.querySelector('link[rel="icon"]');
   if (!link || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const dark = matchMedia('(prefers-color-scheme: dark)');
-  const icon = (a) => 'data:image/svg+xml,' + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='" + (dark.matches ? '#4fd1bf' : '#0f766e') + "' stroke-width='3.2' stroke-linecap='round'><path d='M15 24C9 14 11 3 16 4C20 5 19 15 19 24'/><path transform='rotate(" + a + " 25.2 24)' d='M25 24C31 14 29 3 24 4C20 5 21 15 21 24'/><rect x='9' y='24' width='22' height='11' rx='5.5'/></svg>");
+  const icon = (a) => 'data:image/svg+xml,' + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='2.5 2 35 35' fill='none' stroke='" + (dark.matches ? '#4fd1bf' : '#0f766e') + "' stroke-width='3.4' stroke-linecap='round'><path d='M15 24C9 14 11 3 16 4C20 5 19 15 19 24'/><path transform='rotate(" + a + " 25.2 24)' d='M25 24C31 14 29 3 24 4C20 5 21 15 21 24'/><rect x='9' y='24' width='22' height='11' rx='5.5'/></svg>");
   const keys = [[0, 0], [210, 11], [420, -4], [700, 0]]; // [ms, degrees]
   const angle = (t) => { for (let i = 1; i < keys.length; i++) if (t <= keys[i][0]) { const [t0, a0] = keys[i - 1], [t1, a1] = keys[i]; return a0 + (a1 - a0) * (t - t0) / (t1 - t0); } return 0; };
   const twitch = () => { const start = performance.now(); const tick = () => { const t = performance.now() - start; link.href = icon(angle(t).toFixed(1)); if (t < 700) setTimeout(tick, 40); }; tick(); };
