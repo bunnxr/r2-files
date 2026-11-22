@@ -3,7 +3,7 @@ import { HAS_STREAMS, isZip, readZip, entryBlob, buildZip, mimeOf } from '/zip.j
 let BOOT = { title: 'r2 by bunnxr', accent: '', parallel: 4, retries: 3, view: 'grid', publicHost: '', publicFolders: [], trashDays: 30 };
 try { const r = await fetch('/api/config'); if (r.ok) BOOT = await r.json(); } catch (e) { /* keep defaults */ }
 document.title = BOOT.title;
-{ const h1 = document.querySelector('.brand h1'); if (h1) h1.textContent = BOOT.title; }
+{ const h1 = document.querySelector('.brand h1'); if (h1) { h1.textContent = BOOT.title; const cur = document.createElement('b'); cur.textContent = '_'; h1.append(cur); } } // title + blinking cursor, like the shortener's bunnxr_
 if (BOOT.accent) document.documentElement.style.setProperty('--accent', BOOT.accent);
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1494,91 +1494,6 @@ const newRows = () => [['upload', 'upload', 'Upload files'], ['uploadDir', 'fold
 function doNew(a) { if (a === 'upload') $('#file').click(); else if (a === 'uploadDir') $('#folderInput').click(); else if (a === 'folder') newFolder(); else if (a === 'text') newTextFile(); else if (a === 'zip') newZipFile(); else if (a === 'url') uploadFromUrl(); }
 async function openNew(x, y) { const a = await showMenu('Create or upload', newRows(), x, y); if (a) doNew(a); }
 $('#btnNew').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(); openNew(r.left, r.bottom + 6); };
-
-/* --- liquid New button: the pill's outline is a ring of points on springs; points near the pointer are
-   pulled towards it, so the shape stretches after the cursor like a blob and wobbles back when it leaves.
-   Drawn as an SVG path behind the label; the <button> itself stays a normal button. --- */
-function liquidButton(btn) {
-  if (!btn || matchMedia('(prefers-reduced-motion: reduce)').matches) return; // plain pill from the CSS
-  const NS = 'http://www.w3.org/2000/svg', PAD = 22, REACH = 80, PULL = 0.3, MAXD = 13;
-  const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('class', 'liquid'); svg.setAttribute('aria-hidden', 'true');
-  svg.innerHTML = '<defs><linearGradient id="lqFill" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16927f"/><stop offset="1" stop-color="#0b5e57"/></linearGradient>' +
-    '<radialGradient id="lqGlow" gradientUnits="userSpaceOnUse" r="90"><stop offset="0" stop-color="#0f766e" stop-opacity=".14"/><stop offset="1" stop-color="#0f766e" stop-opacity="0"/></radialGradient></defs>' +
-    '<path class="lq-glow" fill="url(#lqGlow)"/><path class="lq-body" fill="none" stroke="url(#lqFill)" stroke-width="2"/>';
-  btn.classList.add('is-liquid');
-  btn.prepend(svg);
-  const body = svg.querySelector('.lq-body'), glow = svg.querySelector('.lq-glow'), grad = svg.querySelector('#lqGlow');
-  let W = 0, H = 0, pts = [], raf = 0, ptr = null, idle = 0;
-
-  // points around the pill (straight top, right half-circle, straight bottom, left half-circle), ~8px apart
-  function build() {
-    W = btn.offsetWidth; H = btn.offsetHeight;
-    if (!W || !H) return;
-    svg.setAttribute('width', W + PAD * 2); svg.setAttribute('height', H + PAD * 2);
-    svg.setAttribute('viewBox', '0 0 ' + (W + PAD * 2) + ' ' + (H + PAD * 2));
-    const r = H / 2, L = W - 2 * r, per = 2 * L + 2 * Math.PI * r, n = Math.max(24, Math.round(per / 8));
-    pts = [];
-    for (let i = 0; i < n; i++) {
-      let d = (i / n) * per, x, y;
-      if (d < L) { x = r + d; y = 0; }
-      else if ((d -= L) < Math.PI * r) { const a = -Math.PI / 2 + d / r; x = r + L + r * Math.cos(a); y = r + r * Math.sin(a); }
-      else if ((d -= Math.PI * r) < L) { x = r + L - d; y = H; }
-      else { d -= L; const a = Math.PI / 2 + d / r; x = r + r * Math.cos(a); y = r + r * Math.sin(a); }
-      pts.push({ bx: x + PAD, by: y + PAD, ox: 0, oy: 0, vx: 0, vy: 0 });
-    }
-    draw();
-  }
-  // smooth closed curve through the points (Catmull-Rom turned into cubic Béziers)
-  function draw() {
-    const n = pts.length, P = (i) => { const p = pts[(i + n) % n]; return [p.bx + p.ox, p.by + p.oy]; };
-    let d = 'M' + P(0).join(' ');
-    for (let i = 0; i < n; i++) {
-      const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
-      d += 'C' + (p1[0] + (p2[0] - p0[0]) / 6).toFixed(1) + ' ' + (p1[1] + (p2[1] - p0[1]) / 6).toFixed(1) + ' ' +
-        (p2[0] - (p3[0] - p1[0]) / 6).toFixed(1) + ' ' + (p2[1] - (p3[1] - p1[1]) / 6).toFixed(1) + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
-    }
-    body.setAttribute('d', d + 'Z'); glow.setAttribute('d', d + 'Z');
-  }
-  function step() {
-    let moving = false;
-    for (const p of pts) {
-      let tx = 0, ty = 0;
-      if (ptr) {
-        const dx = ptr.x - p.bx, dy = ptr.y - p.by, dist = Math.hypot(dx, dy);
-        if (dist < REACH) {
-          const f = (1 - dist / REACH) * PULL;
-          tx = dx * f; ty = dy * f;
-          const m = Math.hypot(tx, ty); if (m > MAXD) { tx *= MAXD / m; ty *= MAXD / m; }
-        }
-      }
-      p.vx = (p.vx + (tx - p.ox) * 0.12) * 0.82; // spring towards the target, with damping
-      p.vy = (p.vy + (ty - p.oy) * 0.12) * 0.82;
-      p.ox += p.vx; p.oy += p.vy;
-      if (Math.abs(p.vx) > 0.02 || Math.abs(p.vy) > 0.02 || Math.abs(tx - p.ox) > 0.05 || Math.abs(ty - p.oy) > 0.05) moving = true;
-    }
-    if (ptr) { grad.setAttribute('cx', ptr.x); grad.setAttribute('cy', ptr.y); }
-    draw();
-    idle = moving ? 0 : idle + 1;
-    raf = idle > 2 ? 0 : requestAnimationFrame(step); // sleeps when everything has settled
-  }
-  const wake = () => { idle = 0; if (!raf) raf = requestAnimationFrame(step); };
-  // pointer anywhere near the button pulls the shape (works for mouse, pen and touch drags)
-  window.addEventListener('pointermove', (e) => {
-    const b = btn.getBoundingClientRect();
-    const x = e.clientX - b.left + PAD, y = e.clientY - b.top + PAD;
-    const near = x > -REACH + PAD && x < W + PAD + REACH && y > -REACH + PAD && y < H + PAD + REACH;
-    if (near) { ptr = { x, y }; svg.classList.add('lit'); wake(); }
-    else if (ptr) { ptr = null; svg.classList.remove('lit'); wake(); }
-  }, { passive: true });
-  const release = () => { if (ptr) { ptr = null; svg.classList.remove('lit'); wake(); } };
-  document.addEventListener('pointerleave', release);
-  window.addEventListener('blur', release);
-  btn.addEventListener('pointerup', (e) => { if (e.pointerType === 'touch') setTimeout(release, 120); }); // finger lifted: wobble back
-  if (window.ResizeObserver) new ResizeObserver(build).observe(btn); else window.addEventListener('resize', build);
-  build();
-}
-liquidButton($('#btnNew'));
 $('#fab').onclick = () => openNew();
 
 async function newFolder() {
