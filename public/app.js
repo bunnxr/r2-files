@@ -3,7 +3,7 @@ import { HAS_STREAMS, isZip, readZip, entryBlob, buildZip, mimeOf } from '/zip.j
 let BOOT = { title: 'r2 by bunnxr', accent: '', parallel: 4, retries: 3, view: 'grid', publicHost: '', publicFolders: [], trashDays: 30 };
 try { const r = await fetch('/api/config'); if (r.ok) BOOT = await r.json(); } catch (e) { /* keep defaults */ }
 document.title = BOOT.title;
-{ const h1 = document.querySelector('.brand h1'); if (h1) { h1.textContent = BOOT.title; const cur = document.createElement('b'); cur.textContent = '_'; h1.append(cur); } } // title + blinking cursor, like the shortener's bunnxr_
+{ const h1 = document.querySelector('.brand h1'); if (h1) { h1.textContent = '@bunnxr'; const cur = document.createElement('b'); cur.textContent = '_'; h1.append(cur); } } // header: @bunnxr + blinking cursor, like the shortener's bunnxr_ (tab title and breadcrumb still use SITE_TITLE)
 if (BOOT.accent) document.documentElement.style.setProperty('--accent', BOOT.accent);
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1492,6 +1492,22 @@ function showMenu(title, rows, x, y) { return isPhone() || x == null ? sheet(tit
 const newRows = () => [['upload', 'upload', 'Upload files'], ['uploadDir', 'folder', 'Upload folder'], '-', ['folder', 'folderPlus', 'New folder'], ['text', 'edit', 'New text file'], ['zip', 'archive', 'New zip file'], '-', ['url', 'globe', 'Save from a link']];
 function doNew(a) { if (a === 'upload') $('#file').click(); else if (a === 'uploadDir') $('#folderInput').click(); else if (a === 'folder') newFolder(); else if (a === 'text') newTextFile(); else if (a === 'zip') newZipFile(); else if (a === 'url') uploadFromUrl(); }
 async function openNew(x, y) { const a = await showMenu('Create or upload', newRows(), x, y); if (a) doNew(a); }
+/* --- tab icon: Chrome and Edge do not play animations inside tab icons, so the bunny's ear twitch is played
+   here by swapping the icon frame by frame. Same bunny as public/index.html, same timing as the header logo
+   (a twitch every 7 s: 0° → 11° → -4° → 0° over 0.7 s). Off when the system asks for reduced motion. --- */
+(function tabBunny() {
+  const link = document.querySelector('link[rel="icon"]');
+  if (!link || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const dark = matchMedia('(prefers-color-scheme: dark)');
+  const icon = (a) => 'data:image/svg+xml,' + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='" + (dark.matches ? '#4fd1bf' : '#0f766e') + "' stroke-width='3.2' stroke-linecap='round'><path d='M15 24C9 14 11 3 16 4C20 5 19 15 19 24'/><path transform='rotate(" + a + " 25.2 24)' d='M25 24C31 14 29 3 24 4C20 5 21 15 21 24'/><rect x='9' y='24' width='22' height='11' rx='5.5'/></svg>");
+  const keys = [[0, 0], [210, 11], [420, -4], [700, 0]]; // [ms, degrees]
+  const angle = (t) => { for (let i = 1; i < keys.length; i++) if (t <= keys[i][0]) { const [t0, a0] = keys[i - 1], [t1, a1] = keys[i]; return a0 + (a1 - a0) * (t - t0) / (t1 - t0); } return 0; };
+  const twitch = () => { const start = performance.now(); const tick = () => { const t = performance.now() - start; link.href = icon(angle(t).toFixed(1)); if (t < 700) setTimeout(tick, 40); }; tick(); };
+  link.href = icon(0);
+  dark.addEventListener('change', () => { link.href = icon(0); });
+  setTimeout(function loop() { twitch(); setTimeout(loop, 7000); }, 2500);
+})();
+
 $('#btnNew').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(); openNew(r.left, r.bottom + 6); };
 $('#fab').onclick = () => openNew();
 

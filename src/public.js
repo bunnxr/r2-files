@@ -78,6 +78,15 @@ export const proxyRead = (c, request, key) => streamObject(c, request, key, { dl
 const BUNNY_ICON = "data:image/svg+xml," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='#0f766e' stroke-width='3.2' stroke-linecap='round'><style>@media (prefers-color-scheme:dark){svg{stroke:#4fd1bf}}.e{transform-box:fill-box;transform-origin:50% 100%;animation:t 7s 2.5s infinite}@keyframes t{0%,90%,100%{transform:rotate(0)}93%{transform:rotate(11deg)}96%{transform:rotate(-4deg)}}</style><path d='M15 24C9 14 11 3 16 4C20 5 19 15 19 24'/><path class='e' d='M25 24C31 14 29 3 24 4C20 5 21 15 21 24'/><rect x='9' y='24' width='22' height='11' rx='5.5'/></svg>");
 const escHtml = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 
+// Plays the bunny's ear twitch in the tab icon (Chrome / Edge don't animate tab icons themselves) by
+// swapping the icon frame by frame; same bunny, colours and timing as the app (public/app.js, tabBunny).
+const TAB_TWITCH = "(function(){var l=document.querySelector('link[rel=icon]');if(!l||matchMedia('(prefers-reduced-motion: reduce)').matches)return;" +
+  "var dk=matchMedia('(prefers-color-scheme: dark)');" +
+  "function ic(a){return 'data:image/svg+xml,'+encodeURIComponent(\"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='\"+(dk.matches?'#4fd1bf':'#0f766e')+\"' stroke-width='3.2' stroke-linecap='round'><path d='M15 24C9 14 11 3 16 4C20 5 19 15 19 24'/><path transform='rotate(\"+a+\" 25.2 24)' d='M25 24C31 14 29 3 24 4C20 5 21 15 21 24'/><rect x='9' y='24' width='22' height='11' rx='5.5'/></svg>\")}" +
+  "var K=[[0,0],[210,11],[420,-4],[700,0]];function ang(t){for(var i=1;i<K.length;i++)if(t<=K[i][0])return K[i-1][1]+(K[i][1]-K[i-1][1])*(t-K[i-1][0])/(K[i][0]-K[i-1][0]);return 0}" +
+  "function tw(){var s=performance.now();(function f(){var t=performance.now()-s;l.href=ic(ang(t).toFixed(1));if(t<700)setTimeout(f,40)})()}" +
+  "l.href=ic(0);dk.addEventListener('change',function(){l.href=ic(0)});setTimeout(function lp(){tw();setTimeout(lp,7000)},2500)})();";
+
 // Sub-requests a view-only file may be loaded by (from the viewer page). "empty" covers the
 // follow-up range requests some built-in viewers make (e.g. large PDFs).
 const VIEW_DESTS = new Set(["video", "audio", "image", "iframe", "embed", "object", "empty"]);
@@ -94,8 +103,8 @@ function viewerPage(key, cache, guard) {
   else if (mime.startsWith("audio/")) body = '<audio src="?raw=1" controls autoplay preload="metadata"' + media + '></audio>';
   else if (mime.startsWith("image/")) body = '<img src="?raw=1" alt="' + n + '"' + (guard ? ' draggable="false"' : '') + '>';
   else body = '<iframe src="?raw=1' + (guard && mime === "application/pdf" ? '#toolbar=0&amp;navpanes=0' : '') + '" title="' + n + '"></iframe>'; // PDF, text, JSON …
-  const nonce = guard ? crypto.randomUUID().replace(/-/g, "") : "";
-  const script = guard ? '<script nonce="' + nonce + '">addEventListener("contextmenu",function(e){e.preventDefault()});addEventListener("dragstart",function(e){e.preventDefault()});addEventListener("keydown",function(e){if((e.ctrlKey||e.metaKey)&&(e.key==="s"||e.key==="S"))e.preventDefault()})</script>' : '';
+  const nonce = crypto.randomUUID().replace(/-/g, "");
+  const script = '<script nonce="' + nonce + '">' + TAB_TWITCH + (guard ? 'addEventListener("contextmenu",function(e){e.preventDefault()});addEventListener("dragstart",function(e){e.preventDefault()});addEventListener("keydown",function(e){if((e.ctrlKey||e.metaKey)&&(e.key==="s"||e.key==="S"))e.preventDefault()})' : '') + '</script>';
   const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>' + n + '</title><link rel="icon" type="image/svg+xml" href="' + BUNNY_ICON + '"><link rel="alternate icon" href="/favicon.ico">' +
     '<meta name="robots" content="noindex"><meta name="theme-color" content="#121514"><style>' +
@@ -107,7 +116,7 @@ function viewerPage(key, cache, guard) {
     '</style>' + script + '</head><body><main>' + body + '</main></body></html>';
   return new Response(html, { headers: {
     "content-type": "text/html; charset=utf-8", "cache-control": guard ? "private, no-store" : cache, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
-    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" + (guard ? "; script-src 'nonce-" + nonce + "'" : ""),
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'nonce-" + nonce + "'",
     "vary": "Sec-Fetch-Dest, Sec-Fetch-Site",
   } });
 }
