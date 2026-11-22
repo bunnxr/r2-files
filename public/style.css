@@ -18,7 +18,7 @@ button,.btn,.item,.fcard,.nav a{touch-action:manipulation;-webkit-tap-highlight-
 
 .topbar{display:flex;align-items:center;justify-content:space-between;max-width:1180px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left))}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
-.logo{width:34px;height:34px;display:grid;place-items:center;background:none;color:var(--accent)}
+.logo{width:44px;height:44px;display:grid;place-items:center;background:none;color:var(--accent)}
 .brand h1{margin:0;font-size:18px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:20px;max-width:1180px;margin:14px auto 0;padding:0 max(16px,env(safe-area-inset-right)) 120px max(16px,env(safe-area-inset-left));align-items:start}
 .side{display:flex;flex-direction:column;gap:18px;position:sticky;top:14px}
@@ -491,3 +491,9 @@ b,strong{font-weight:600}
 @keyframes bunnyDraw{to{stroke-dashoffset:0}}
 @keyframes bunnyTwitch{0%,90%,100%{transform:rotate(0)}93%{transform:rotate(11deg)}96%{transform:rotate(-4deg)}}
 @media(prefers-reduced-motion:reduce){.logo .d,.logo .ear{animation:none;stroke-dashoffset:0}}
+/* ---- desktop: use the full window width, sidebar pinned to the left edge (no centred column) ---- */
+@media(min-width:900px){
+ .topbar,.layout{max-width:none;margin-left:0;margin-right:0;padding-left:max(28px,env(safe-area-inset-left));padding-right:max(28px,env(safe-area-inset-right))}
+ .layout{gap:28px}
+ .logo{width:48px;height:48px}
+}

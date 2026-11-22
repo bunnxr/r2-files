@@ -137,7 +137,7 @@ function askFolder() {
 function applyView() { $('#list').dataset.view = S.view; $('#btnView').innerHTML = ico(S.view === 'grid' ? 'list' : 'grid', 19); }
 $('#btnView').onclick = () => { S.view = S.view === 'grid' ? 'list' : 'grid'; ls.set('fm-view', S.view); applyView(); };
 // Logo: the bunny from the shortener (links.bunnxr.com). Draws itself in on load, then the right ear twitches now and then.
-$('#logo').innerHTML = '<svg viewBox="0 0 40 40" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path class="d" pathLength="1" d="M15 24C9 14 11 3 16 4C20 5 19 15 19 24"/><path class="d ear" pathLength="1" d="M25 24C31 14 29 3 24 4C20 5 21 15 21 24"/><rect class="d" pathLength="1" x="9" y="24" width="22" height="11" rx="5.5"/></svg>';
+$('#logo').innerHTML = '<svg viewBox="0 0 40 40" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path class="d" pathLength="1" d="M15 24C9 14 11 3 16 4C20 5 19 15 19 24"/><path class="d ear" pathLength="1" d="M25 24C31 14 29 3 24 4C20 5 21 15 21 24"/><rect class="d" pathLength="1" x="9" y="24" width="22" height="11" rx="5.5"/></svg>';
 $('#searchIco').innerHTML = ico('search', 17);
 $('#upToggle').innerHTML = ico('down', 18);
 $('#upClear').innerHTML = ico('broom', 17);
