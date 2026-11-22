@@ -63,7 +63,7 @@ async function handle(request, env, ctx) {
     if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
     if (url.pathname === "/manifest.webmanifest") {
       const icon = (src, sizes, extra) => Object.assign({ src, sizes, type: "image/png" }, extra);
-      return new Response(JSON.stringify({ name: c.SITE_TITLE, short_name: c.SITE_TITLE.slice(0, 12), start_url: "/", scope: "/", display: "standalone", background_color: "#fcf7ef", theme_color: safeColor(c.ACCENT, "#0f766e"), icons: [icon("/icon-192.png", "192x192"), icon("/icon-512.png", "512x512"), icon("/icon-maskable-512.png", "512x512", { purpose: "maskable" })] }), { headers: { "content-type": "application/manifest+json", "cache-control": "no-store" } });
+      return new Response(JSON.stringify({ name: c.SITE_TITLE, short_name: c.SITE_TITLE.slice(0, 12), start_url: "/", scope: "/", display: "standalone", background_color: "#fbf8f3", theme_color: safeColor(c.ACCENT, "#0f766e"), icons: [icon("/icon-192.png", "192x192"), icon("/icon-512.png", "512x512"), icon("/icon-maskable-512.png", "512x512", { purpose: "maskable" })] }), { headers: { "content-type": "application/manifest+json", "cache-control": "no-store" } });
     }
     if (!env.ASSETS) return new Response("Static assets binding missing. Check the [assets] section in wrangler.toml.", { status: 500 });
     const res = await env.ASSETS.fetch(request);
