@@ -501,6 +501,18 @@ cleanup() { PASSWORD=""; printf '\n' > "$TTY" 2>/dev/null || true; }
 trap 'cleanup; exit 130' INT
 trap 'cleanup' EXIT
 
+printf '\033[36m' > "$TTY"
+cat > "$TTY" <<'BANNER'
+
+   ____    _
+  / __ \  | |__   _   _  _ __   _ __  __  __ _ __
+ / / _` | | '_ \ | | | || '_ \ | '_ \ \ \/ /| '__|
+| | (_| | | |_) || |_| || | | || | | | >  < | |
+ \ \__,_| |_.__/  \__,_||_| |_||_| |_|/_/\_\|_|
+  \____/
+
+BANNER
+printf '\033[0m' > "$TTY"
 say "r2 by bunnxr: terminal upload"
 say "$API"
 

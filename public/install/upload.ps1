@@ -462,6 +462,18 @@ function Start-Prompt {
 # ---------------------------------------------------------------------
 #  9. Start
 # ---------------------------------------------------------------------
+# Plain ASCII only: irm | iex can mis-decode anything fancier on 5.1.
+$banner = @'
+
+   ____    _
+  / __ \  | |__   _   _  _ __   _ __  __  __ _ __
+ / / _` | | '_ \ | | | || '_ \ | '_ \ \ \/ /| '__|
+| | (_| | | |_) || |_| || | | || | | | >  < | |
+ \ \__,_| |_.__/  \__,_||_| |_||_| |_|/_/\_\|_|
+  \____/
+
+'@
+Write-Host $banner -ForegroundColor Cyan
 Say 'r2 by bunnxr: terminal upload'
 Say $Script:Api
 
