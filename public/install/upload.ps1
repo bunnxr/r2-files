@@ -147,7 +147,7 @@ function Invoke-Api {
 
 function Request-Password {
   while ($true) {
-    $secure = Read-Host -Prompt 'Upload password' -AsSecureString
+    $secure = Read-Host -Prompt 'Upload Password' -AsSecureString
     if ($null -eq $secure -or $secure.Length -eq 0) {
       Warn 'Nothing entered.'
     } else {
