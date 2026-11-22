@@ -72,10 +72,10 @@ export const proxyRead = (c, request, key) => streamObject(c, request, key, { dl
 // ---------------------------------------------------------------------
 //  Viewer page for short links opened in a tab: the site's logo as the tab icon and the file name as the
 //  title. The page itself is empty apart from the file, shown full size (video / audio player,
-//  image, PDF or text). No scripts. The orb logo matches public/favicon.ico and the app header.
+//  image, PDF or text). The bunny logo matches public/favicon.ico and the app header.
 // ---------------------------------------------------------------------
-const ORB = "<circle cx='11' cy='13' r='8.5' fill='#0f766e'/><circle cx='9.4' cy='11.2' r='6.4' fill='#1f9686'/><circle cx='8.2' cy='9.8' r='3.6' fill='#45b8a7'/><circle cx='19.6' cy='4.6' r='2.1' fill='#2fa594'/>";
-const ORB_ICON = "data:image/svg+xml," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>" + ORB + "</svg>");
+// The bunny (as in the shortener): deep teal on light tabs, brighter teal on dark ones; the ear twitches.
+const BUNNY_ICON = "data:image/svg+xml," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='#0f766e' stroke-width='3.2' stroke-linecap='round'><style>@media (prefers-color-scheme:dark){svg{stroke:#4fd1bf}}.e{transform-box:fill-box;transform-origin:50% 100%;animation:t 7s 2.5s infinite}@keyframes t{0%,90%,100%{transform:rotate(0)}93%{transform:rotate(11deg)}96%{transform:rotate(-4deg)}}</style><path d='M15 24C9 14 11 3 16 4C20 5 19 15 19 24'/><path class='e' d='M25 24C31 14 29 3 24 4C20 5 21 15 21 24'/><rect x='9' y='24' width='22' height='11' rx='5.5'/></svg>");
 const escHtml = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 
 // Sub-requests a view-only file may be loaded by (from the viewer page). "empty" covers the
@@ -97,7 +97,7 @@ function viewerPage(key, cache, guard) {
   const nonce = guard ? crypto.randomUUID().replace(/-/g, "") : "";
   const script = guard ? '<script nonce="' + nonce + '">addEventListener("contextmenu",function(e){e.preventDefault()});addEventListener("dragstart",function(e){e.preventDefault()});addEventListener("keydown",function(e){if((e.ctrlKey||e.metaKey)&&(e.key==="s"||e.key==="S"))e.preventDefault()})</script>' : '';
   const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<title>' + n + '</title><link rel="icon" type="image/svg+xml" href="' + ORB_ICON + '"><link rel="alternate icon" href="/favicon.ico">' +
+    '<title>' + n + '</title><link rel="icon" type="image/svg+xml" href="' + BUNNY_ICON + '"><link rel="alternate icon" href="/favicon.ico">' +
     '<meta name="robots" content="noindex"><meta name="theme-color" content="#121514"><style>' +
     'html,body{height:100%;margin:0}body{display:flex;flex-direction:column;background:#121514;color:#e9ecea;font:500 14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}' +
     'main{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}' +
