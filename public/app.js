@@ -267,7 +267,7 @@ function folderItemHtml(f, i) {
 //   public/app.js      driveHtml() below, renderDrives() and the $('#folders') click handler
 // data-drive = index into DRIVES.
 function driveHtml(d, i) {
-  return '<div class="fcard drive" data-drive="' + i + '" role="button" tabindex="0" title="Open ' + esc(d.label) + '"><div class="f-top">' + tile('server', 22) + '</div><b>' + esc(d.label) + '</b></div>';
+  return '<div class="fcard drive" data-drive="' + i + '" role="button" tabindex="0" title="Open ' + esc(d.label) + '"><div class="f-top">' + tile('server', 22) + '</div><b>' + esc(d.label) + '</b><small>Direct Server Path, use u.bunnxr.com/local for CLI.</small></div>';
 }
 function renderDrives() {
   const show = !S.kind && !S.prefix && DRIVES.length > 0;
