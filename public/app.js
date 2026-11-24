@@ -98,9 +98,11 @@ const MARK = {
   file: '<circle class="f" cx="9.4" cy="14.6" r="1"/><circle class="f" cx="12" cy="14.6" r="1"/><circle class="f" cx="14.6" cy="14.6" r="1"/>',
 };
 const FOLDER = '<path d="M3.5 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6l1.4 1.4h6.6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 10h17"/><rect class="f" x="6" y="12.6" width="4" height="1.8" rx=".9"/>';
+// A mini PC seen from the front: the case, a front panel line, a power light and a vent (used for drives like Zenith)
+const SERVER = '<rect x="3.5" y="6" width="17" height="12" rx="3"/><path d="M3.5 13.5h17M11 15.9h5.5"/><circle class="f" cx="7.2" cy="15.9" r="1"/><path d="M7.5 9.6h9"/>';
 const inkIcon = (body, s) => '<svg class="i ink" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + body + '</svg>';
 const fileIcon = (k, s) => inkIcon(PAGE + (MARK[k] || MARK.file), s);
-const tile = (k, s) => '<span class="tile' + (k === 'folder' ? ' fold' : '') + '">' + inkIcon(k === 'folder' ? FOLDER : PAGE + (MARK[k] || MARK.file), Math.round((s || 22) * 1.35)) + '</span>';
+const tile = (k, s) => '<span class="tile' + (k === 'folder' ? ' fold' : '') + '">' + inkIcon(k === 'folder' ? FOLDER : k === 'server' ? SERVER : PAGE + (MARK[k] || MARK.file), Math.round((s || 22) * 1.35)) + '</span>';
 const GLYPH = { folder: 'folder', image: 'image', video: 'video', audio: 'audio', pdf: 'doc', archive: 'archive', code: 'code', sheet: 'sheet', doc: 'doc', file: 'file' };
 const PREV = { image: 1, video: 1, audio: 1, pdf: 1 };
 const kindOf = (name) => { const e = name.indexOf('.') < 0 ? '' : name.split('.').pop().toLowerCase(); for (const k in EXT) if ((' ' + EXT[k] + ' ').indexOf(' ' + e + ' ') >= 0 && e) return k; return 'file'; };
@@ -265,7 +267,7 @@ function folderItemHtml(f, i) {
 //   public/app.js      driveHtml() below, renderDrives() and the $('#folders') click handler
 // data-drive = index into DRIVES.
 function driveHtml(d, i) {
-  return '<div class="fcard drive" data-drive="' + i + '" role="button" tabindex="0" title="Open ' + esc(d.label) + '"><div class="f-top">' + tile('folder', 22) + '</div><b>' + esc(d.label) + '</b><small>Your own server. Uploads here go to it, not to R2.</small></div>';
+  return '<div class="fcard drive" data-drive="' + i + '" role="button" tabindex="0" title="Open ' + esc(d.label) + '"><div class="f-top">' + tile('server', 22) + '</div><b>' + esc(d.label) + '</b></div>';
 }
 function renderDrives() {
   const show = !S.kind && !S.prefix && DRIVES.length > 0;
@@ -946,7 +948,7 @@ function pickFolder(title, label, start) {
       try {
         const d = await api('/api/list?prefix=' + encodeURIComponent(dir));
         if (mine !== dir || !$('#pkList')) return;
-        const rows = (dir ? [] : DRIVES.map((dv) => '<div class="pk-row" data-d="' + esc(dv.root) + '">' + ico('database', 18) + '<span>' + esc(dv.label) + '</span></div>'))
+        const rows = (dir ? [] : DRIVES.map((dv) => '<div class="pk-row" data-d="' + esc(dv.root) + '">' + inkIcon(SERVER, 18) + '<span>' + esc(dv.label) + '</span></div>'))
           .concat(d.folders.map((f) => '<div class="pk-row" data-d="' + esc(f) + '">' + ico('folder', 18) + '<span>' + esc(f.slice(dir.length).replace(/\/$/, '')) + '</span></div>'));
         $('#pkList').innerHTML = rows.length ? rows.join('') : '<div class="empty" style="padding:28px 12px"><p>No folders in here. You can choose this one.</p></div>';
       } catch (e) { if ($('#pkList')) $('#pkList').innerHTML = '<div class="empty"><p>' + esc(e.message) + '</p></div>'; }
@@ -1223,7 +1225,7 @@ function pickFile(title, start) {
       try {
         const d = await api('/api/list?prefix=' + encodeURIComponent(dir));
         if (mine !== dir || !$('#pkList')) return;
-        const rows = (dir ? [] : DRIVES.map((dv) => '<div class="pk-row" data-d="' + esc(dv.root) + '">' + ico('database', 18) + '<span>' + esc(dv.label) + '</span></div>')).concat(d.folders.map((f) => '<div class="pk-row" data-d="' + esc(f) + '">' + ico('folder', 18) + '<span>' + esc(f.slice(dir.length).replace(/\/$/, '')) + '</span></div>')
+        const rows = (dir ? [] : DRIVES.map((dv) => '<div class="pk-row" data-d="' + esc(dv.root) + '">' + inkIcon(SERVER, 18) + '<span>' + esc(dv.label) + '</span></div>')).concat(d.folders.map((f) => '<div class="pk-row" data-d="' + esc(f) + '">' + ico('folder', 18) + '<span>' + esc(f.slice(dir.length).replace(/\/$/, '')) + '</span></div>')
           .concat(d.files.filter((f) => !f.key.endsWith('/')).map((f) => { const n = f.key.slice(dir.length); return '<div class="pk-row" data-k="' + esc(f.key) + '">' + ico(GLYPH[kindOf(n)], 18) + '<span>' + esc(n) + '</span><small class="pk-sz">' + fmt(f.size) + '</small></div>'; })));
         $('#pkList').innerHTML = rows.length ? rows.join('') : '<div class="empty" style="padding:28px 12px"><p>This folder is empty.</p></div>';
       } catch (e) { if ($('#pkList')) $('#pkList').innerHTML = '<div class="empty"><p>' + esc(e.message) + '</p></div>'; }
