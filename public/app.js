@@ -981,35 +981,65 @@ async function moveFiles(list, mode) {
   }
   report(copy ? 'Copied' : 'Moved', r);
 }
-// Move or copy files between R2 and Zenith, one at a time; big files take several calls (POST /api/xfer)
+// At most n of the given tasks running at once
+function limiter(n) {
+  let active = 0;
+  const q = [];
+  const next = () => {
+    if (active >= n || !q.length) return;
+    active++;
+    const [fn, ok, bad] = q.shift();
+    Promise.resolve().then(fn).then(ok, bad).finally(() => { active--; next(); });
+  };
+  return (fn) => new Promise((ok, bad) => { q.push([fn, ok, bad]); next(); });
+}
+// Move or copy files between R2 and Zenith. Like uploads, BOOT.parallel requests run at once, shared
+// between files (small ones go whole) and the 64 MB parts of big files (POST /api/xfer, /part, /finish).
 async function xferFiles(list, dest, mode) {
   const copy = mode === 'copy', j = startJob((copy ? 'Copying to ' : 'Moving to ') + where(dest));
   if (!j) return null;
   const total = list.reduce((n, f) => n + (f.size || 0), 0);
-  let before = 0, done = 0;
+  const slot = limiter(Math.max(1, BOOT.parallel || 4));
+  let moved = 0, done = 0;
   const errors = [];
-  const pct = (b) => (total ? Math.min(99, ((before + b) / total) * 100) : null);
-  for (let i = 0; i < list.length && !j.canceled; i++) {
-    const f = list[i], who = f.name + (list.length > 1 ? ' (' + (i + 1) + ' of ' + list.length + ')' : '');
+  const show = () => updateJob(done + ' of ' + list.length + (list.length === 1 ? ' file, ' : ' files, ') + fmt(moved) + ' of ' + fmt(total), total ? Math.min(99, (moved / total) * 100) : null);
+  // one request; not sent once the job is canceled or halt() says so. Only parts are retried (sending a
+  // part again just replaces it); a start or finish may have worked even if its answer got lost.
+  const call = (path, body, halt) => slot(async () => {
+    let last;
+    const tries = path === '/api/xfer/part' ? BOOT.retries : 1;
+    for (let t = 1; t <= tries; t++) {
+      if (j.canceled || (halt && halt())) throw CANCEL;
+      try { return await api(path, body); } catch (e) { last = e; if (t < tries) await sleep(700 * t * t); }
+    }
+    throw last;
+  });
+  const one = async (f) => {
     let job = null;
     try {
-      updateJob(who, pct(0));
-      let r = await api('/api/xfer', { from: f.key, dest, mode });
-      while (!r.done) {
+      const r = await call('/api/xfer', { from: f.key, dest, mode });
+      if (!r.done) {
         job = r.job;
-        if (j.canceled) break;
-        updateJob(who + ': ' + fmt(r.copied) + ' of ' + fmt(job.size), pct(r.copied));
-        r = await api('/api/xfer', { job });
-      }
-      if (r.done) { done++; job = null; }
-    } catch (e) { errors.push({ error: f.name + ': ' + e.message }); }
-    // stopped half-way (canceled, or the connection dropped): throw the unfinished copy away
+        const n = Math.ceil(job.size / job.partSize), etags = new Array(n);
+        let failed = null;
+        await Promise.all(Array.from({ length: n }, (_, i) => call('/api/xfer/part', { job, n: i + 1 }, () => !!failed)
+          .then((p) => { etags[i] = p.etag; moved += Math.min(job.partSize, job.size - i * job.partSize); show(); })
+          .catch((e) => { if (!failed && e !== CANCEL) failed = e; })));
+        if (j.canceled) throw CANCEL;
+        if (failed) throw failed;
+        await call('/api/xfer/finish', { job, etags });
+        job = null;
+      } else { moved += f.size || 0; }
+      done++; show();
+    } catch (e) { if (e !== CANCEL) errors.push(f.name + ': ' + e.message); }
+    // stopped half-way (canceled or failed): throw the unfinished copy away
     if (job) api('/api/upload/abort', { key: job.to, uploadId: job.uploadId }).catch(() => {});
-    before += f.size || 0;
-  }
+  };
+  show();
+  await Promise.all(list.map(one));
   const canceled = j.canceled;
   endJob();
-  return { done, errors: errors.map((e) => e.error), canceled };
+  return { done, errors, canceled };
 }
 
 /* --- share links --- */

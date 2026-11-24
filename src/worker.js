@@ -198,8 +198,13 @@ async function handle(request, env, ctx) {
     }
     case "POST /api/move":
       return json(await ops.moveBatch(c, await readJson(request)));
-    case "POST /api/xfer": // move or copy one file between R2 and Zenith, step by step
-      return json(await ops.xferStep(c, await readJson(request)));
+    // Move or copy one file between R2 and Zenith: start, then parts (several at once), then finish
+    case "POST /api/xfer":
+      return json(await ops.xferStart(c, await readJson(request)));
+    case "POST /api/xfer/part":
+      return json(await ops.xferPart(c, await readJson(request)));
+    case "POST /api/xfer/finish":
+      return json(await ops.xferFinish(c, await readJson(request)));
     case "POST /api/trash":
       return json(await ops.trashBatch(c, await readJson(request)));
     case "POST /api/trash-folder":

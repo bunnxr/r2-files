@@ -45,7 +45,7 @@ In the web app Zenith is a card in the **Drives** row above the R2 files. Open i
 - **No trash.** Deleting on Zenith is permanent, after a confirmation.
 - **Files added over SMB** show up the next time the folder is listed. They may have no stored content type (it is then guessed from the file name), and their ETags are not checked against R2.
 - **Short links** to Zenith files work like R2 links (`bunnxr.com/name`, `r2.bunnxr.com/name`): opening one streams the file from Zenith. When a file is moved, between drives or within one, its links follow it.
-- **Moving between R2 and Zenith** streams the file through the Worker (`POST /api/xfer`). Files up to 95 MiB go in one call; bigger ones are copied 2 × 64 MiB parts per call while the app shows progress. The source is deleted only after the copy is complete.
+- **Moving between R2 and Zenith** streams the file through the Worker. Files up to 95 MiB go in one call (`POST /api/xfer`). Bigger ones become a multipart upload: each 64 MiB part is its own call (`POST /api/xfer/part`), and `POST /api/xfer/finish` completes it. Like uploads, the app runs `PARALLEL_UPLOADS` calls at once, spread over files and parts, and retries a failed part. The source is deleted only after the copy is complete. Speed is still capped by your home connection: upload speed for Zenith → R2, download speed for R2 → Zenith.
 - **R2 only:** the Storage figure, Largest files, Recent and the type views (Images, Videos …), the trash, and public folders.
 
 If Zenith answers 403 *SignatureDoesNotMatch*, the tunnel is probably rewriting the `Host` header: the signature covers the host in `ZENITH_ENDPOINT`.

@@ -48,18 +48,22 @@ export async function moveBatch(c, b) {
 
 // ---------------------------------------------------------------------
 //  Copy or move ONE file between R2 and Zenith, streamed through the Worker
-//  (nothing is held in memory). Small files go in one call. Bigger files
-//  become a multipart upload on the destination, and the browser calls this
-//  again with the `job` it got back until `done`, two parts per call, so each
-//  request stays far below the 50-subrequest cap. Any failure aborts the
-//  upload, so no half-finished parts are left behind on either side.
-//    b: { from, dest, mode: "move" | "copy" }            first call
-//    b: { job: { from, to, mode, uploadId, size, partSize, etags } }  next calls
-//  Answer: { done: true, from, to } or { done: false, job, copied }
+//  (nothing is held in memory). The browser drives it, several requests at
+//  a time, the same way it uploads:
+//    POST /api/xfer         { from, dest, mode }   small files (up to 95 MiB) are copied right here:
+//                                                  { done: true, from, to }; bigger ones start a multipart
+//                                                  upload on the destination: { done: false, job }
+//    POST /api/xfer/part    { job, n }             copies part n (a Range read streamed into UploadPart):
+//                                                  { etag }; the browser sends several of these at once
+//    POST /api/xfer/finish  { job, etags }         completes the upload, then deletes the source for a
+//                                                  move and carries notes and links: { done: true, from, to }
+//  One part per request keeps each request tiny (2 subrequests) and lets the
+//  browser run parts in parallel. If the browser gives up it aborts the upload
+//  (POST /api/upload/abort), so no half-finished parts are left behind.
+//  job: { from, to, mode, uploadId, size, partSize }
 // ---------------------------------------------------------------------
 const XFER_ONE_SHOT = 95 * MiB; // up to this size, a single GET and PUT
 const XFER_PART = 64 * MiB;
-const XFER_PARTS_PER_CALL = 2;
 
 async function finishXfer(c, from, to, mode) {
   if (mode === "move") await store(c).remove(from);
@@ -69,47 +73,56 @@ async function finishXfer(c, from, to, mode) {
   return { done: true, from, to };
 }
 
-export async function xferStep(c, b) {
+export async function xferStart(c, b) {
   const st = store(c);
-  if (!b.job) {
-    const from = b.from, dest = typeof b.dest === "string" ? b.dest : "", mode = b.mode === "copy" ? "copy" : "move";
-    if (!fileKey(from)) throw new HttpError(400, "Invalid file.");
-    if (!okDest(dest)) throw new HttpError(400, "Invalid destination folder.");
-    if (sameDrive(from, dest)) throw new HttpError(400, "Both are on the same drive: use a normal move.");
-    const src = await st.stat(from);
-    if (!src) throw new HttpError(404, "File not found: " + baseOf(from));
-    const type = src.type || "application/octet-stream";
-    const to = await uniqueKey(c, dest, baseOf(from));
-    if (src.size <= XFER_ONE_SHOT) {
-      const res = await st.get(from);
-      if (!res.ok || !res.body) throw new HttpError(502, st.label(from) + " error " + res.status + " while reading " + baseOf(from));
-      await st.put(to, res.body, { type, length: src.size });
-      return finishXfer(c, from, to, mode);
-    }
-    let partSize = Math.ceil(Math.max(XFER_PART, Math.ceil(src.size / 10000)) / MiB) * MiB;
-    if (partSize > st.maxPart(to)) throw new HttpError(413, "That file is too large to copy to " + st.label(to) + ".");
-    const uploadId = await st.mp.create(to, type);
-    return { done: false, copied: 0, job: { from, to, mode, uploadId, size: src.size, partSize, etags: [] } };
+  const from = b.from, dest = typeof b.dest === "string" ? b.dest : "", mode = b.mode === "copy" ? "copy" : "move";
+  if (!fileKey(from)) throw new HttpError(400, "Invalid file.");
+  if (!okDest(dest)) throw new HttpError(400, "Invalid destination folder.");
+  if (sameDrive(from, dest)) throw new HttpError(400, "Both are on the same drive: use a normal move.");
+  const src = await st.stat(from);
+  if (!src) throw new HttpError(404, "File not found: " + baseOf(from));
+  const type = src.type || "application/octet-stream";
+  const to = await uniqueKey(c, dest, baseOf(from));
+  if (src.size <= XFER_ONE_SHOT) {
+    const res = await st.get(from);
+    if (!res.ok || !res.body) throw new HttpError(502, st.label(from) + " error " + res.status + " while reading " + baseOf(from));
+    await st.put(to, res.body, { type, length: src.size });
+    return finishXfer(c, from, to, mode);
   }
+  const partSize = Math.ceil(Math.max(XFER_PART, Math.ceil(src.size / 10000)) / MiB) * MiB;
+  if (partSize > st.maxPart(to)) throw new HttpError(413, "That file is too large to copy to " + st.label(to) + ".");
+  const uploadId = await st.mp.create(to, type);
+  return { done: false, job: { from, to, mode, uploadId, size: src.size, partSize } };
+}
 
-  const j = b.job;
+function checkJob(st, j) {
   const ok = j && fileKey(j.from) && fileKey(j.to) && !sameDrive(j.from, j.to) && typeof j.uploadId === "string" && j.uploadId &&
     Number.isInteger(j.size) && j.size > 0 && Number.isInteger(j.partSize) && j.partSize >= 5 * MiB && j.partSize <= st.maxPart(j.to) &&
-    Array.isArray(j.etags) && j.etags.every((e) => typeof e === "string" && e) && (j.mode === "move" || j.mode === "copy");
+    (j.mode === "move" || j.mode === "copy");
   if (!ok) throw new HttpError(400, "Invalid transfer.");
-  const parts = Math.ceil(j.size / j.partSize);
+  return Math.ceil(j.size / j.partSize);
+}
+
+export async function xferPart(c, b) {
+  const st = store(c), j = b.job, n = Number(b.n);
+  const parts = checkJob(st, j);
+  if (!Number.isInteger(n) || n < 1 || n > parts) throw new HttpError(400, "Invalid part.");
+  const off = (n - 1) * j.partSize, end = Math.min(off + j.partSize, j.size) - 1;
+  const res = await st.get(j.from, { headers: { range: "bytes=" + off + "-" + end } });
+  if (res.status !== 206 || !res.body) throw new HttpError(502, st.label(j.from) + " error " + res.status + " while reading " + baseOf(j.from));
+  // Files on Zenith can change at any time (SMB): stop if this one did
+  const total = Number(((res.headers.get("content-range") || "").split("/")[1]) || NaN);
+  if (total !== j.size) { try { await res.body.cancel(); } catch (e) { /* ignore */ } throw new HttpError(409, baseOf(j.from) + " changed while it was being copied. Try again."); }
+  return { etag: await st.mp.part(j.to, j.uploadId, n, res.body, end - off + 1) };
+}
+
+export async function xferFinish(c, b) {
+  const st = store(c), j = b.job;
+  const parts = checkJob(st, j);
+  const etags = Array.isArray(b.etags) ? b.etags : [];
+  if (etags.length !== parts || !etags.every((e) => typeof e === "string" && e)) throw new HttpError(400, "Some parts are missing.");
   try {
-    for (let s = 0; s < XFER_PARTS_PER_CALL && j.etags.length < parts; s++) {
-      const n = j.etags.length + 1, off = (n - 1) * j.partSize, end = Math.min(off + j.partSize, j.size) - 1;
-      const res = await st.get(j.from, { headers: { range: "bytes=" + off + "-" + end } });
-      const total = Number(((res.headers.get("content-range") || "").split("/")[1]) || NaN);
-      if (res.status !== 206 || !res.body) throw new HttpError(502, st.label(j.from) + " error " + res.status + " while reading " + baseOf(j.from));
-      // Files on Zenith can change at any time (SMB): stop if this one did
-      if (total !== j.size) throw new HttpError(409, baseOf(j.from) + " changed while it was being copied. Try again.");
-      j.etags.push(await st.mp.part(j.to, j.uploadId, n, res.body, end - off + 1));
-    }
-    if (j.etags.length < parts) return { done: false, copied: j.etags.length * j.partSize, job: j };
-    await st.mp.complete(j.to, j.uploadId, j.etags.map((e, i) => ({ n: i + 1, e })));
+    await st.mp.complete(j.to, j.uploadId, etags.map((e, i) => ({ n: i + 1, e })));
   } catch (e) {
     try { await st.mp.abort(j.to, j.uploadId); } catch (x) { /* ignore */ }
     throw e;
