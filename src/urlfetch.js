@@ -1,7 +1,8 @@
-// "Upload from URL": the Worker downloads a link and streams it into R2 as a multipart upload.
+// "Upload from URL": the Worker downloads a link and streams it into storage (R2, or Zenith when the
+// destination folder is on Zenith) as a multipart upload.
 // Progress is sent back to the browser as newline-delimited JSON.
 import { HttpError, validPrefix, sanitizeName, isInternal } from "./util.js";
-import { r2, xmlEsc, xmlTag, r2Error, uniqueKey } from "./r2.js";
+import { store, uniqueKey } from "./storage/index.js";
 
 const MiB = 1024 ** 2;
 const te = new TextEncoder();
@@ -39,6 +40,7 @@ export function fetchToR2(c, ctx, b) {
   const w = writable.getWriter();
   const send = (o) => w.write(te.encode(JSON.stringify(o) + "\n"));
 
+  const st = store(c);
   ctx.waitUntil((async () => {
     let key = "", uploadId = "";
     try {
@@ -51,18 +53,14 @@ export function fetchToR2(c, ctx, b) {
       await send({ stage: "start", key, size });
 
       const partSize = size ? Math.min(48 * MiB, Math.max(16 * MiB, Math.ceil(size / 40))) : 32 * MiB;
-      const init = await r2(c, "POST", key, { query: { uploads: "" }, headers: { "content-type": ctype } });
-      uploadId = xmlTag(init.text, "UploadId");
-      if (!init.ok || !uploadId) throw new Error(r2Error(init));
+      uploadId = await st.mp.create(key, ctype);
 
       const reader = res.body.getReader();
       const etags = [];
       let chunks = [], have = 0, total = 0;
       const flush = async () => {
         const n = etags.length + 1;
-        const r = await r2(c, "PUT", key, { query: { partNumber: String(n), uploadId }, body: new Blob(chunks) });
-        if (!r.ok) throw new Error(r2Error(r));
-        etags.push(r.headers.get("etag") || "");
+        etags.push(await st.mp.part(key, uploadId, n, new Blob(chunks)));
         chunks = []; have = 0;
         await send({ progress: total, size });
       };
@@ -73,20 +71,17 @@ export function fetchToR2(c, ctx, b) {
         if (have >= partSize) await flush();
       }
       if (total === 0) { // empty file: multipart needs at least one part, so use a plain PUT
-        await r2(c, "DELETE", key, { query: { uploadId } });
+        await st.mp.abort(key, uploadId);
         uploadId = "";
-        const e = await r2(c, "PUT", key, { headers: { "content-type": ctype }, body: "" });
-        if (!e.ok) throw new Error(r2Error(e));
+        await st.put(key, "", { type: ctype });
       } else {
         if (have > 0) await flush();
-        const xml = "<CompleteMultipartUpload>" + etags.map((t, i) => "<Part><PartNumber>" + (i + 1) + "</PartNumber><ETag>" + xmlEsc(t) + "</ETag></Part>").join("") + "</CompleteMultipartUpload>";
-        const done = await r2(c, "POST", key, { query: { uploadId }, body: xml });
-        if (!done.ok || /<Error>/.test(done.text)) throw new Error(r2Error(done));
+        await st.mp.complete(key, uploadId, etags.map((e, i) => ({ n: i + 1, e })));
         uploadId = "";
       }
       await send({ done: true, key, size: total });
     } catch (e) {
-      if (uploadId) { try { await r2(c, "DELETE", key, { query: { uploadId } }); } catch (x) { /* ignore */ } }
+      if (uploadId) { try { await st.mp.abort(key, uploadId); } catch (x) { /* ignore */ } }
       try { await send({ error: String(e.message || e) }); } catch (x) { /* client left */ }
     } finally {
       try { await w.close(); } catch (x) { /* ignore */ }

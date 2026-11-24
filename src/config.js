@@ -70,6 +70,12 @@ function getConfig(env) {
   c.PUBLIC_FOLDER_LIST = c.PUBLIC_FOLDERS.split(",").map((p) => p.trim().replace(/^\/+/, "")).filter((p) => p && !p.startsWith(".trash")).map((p) => p.replace(/\/*$/, "/"));
   // The shortener Worker's KV namespace (read only), so file links never clash with its back-halves
   c.SHORTENER_KV = env && env.SHORTENER_KV && typeof env.SHORTENER_KV.get === "function" ? env.SHORTENER_KV : null;
+  // Zenith, the self-hosted S3 server (src/storage/zenith.js). Read only from the Worker's secrets
+  // ZENITH_ENDPOINT, ZENITH_BUCKET, ZENITH_KEY and ZENITH_SECRET: there are deliberately no defaults
+  // here and nothing in wrangler.toml. If any is missing, Zenith is simply off and R2 is unaffected.
+  const zv = (k) => (env && typeof env[k] === "string" ? env[k].trim() : "");
+  const zenith = { endpoint: zv("ZENITH_ENDPOINT").replace(/\/+$/, ""), bucket: zv("ZENITH_BUCKET"), key: zv("ZENITH_KEY"), secret: zv("ZENITH_SECRET") };
+  c.ZENITH = /^https:\/\/[^/\s]+$/.test(zenith.endpoint) && zenith.bucket && zenith.key && zenith.secret ? zenith : null;
   return c;
 }
 

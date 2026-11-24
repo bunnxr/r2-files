@@ -1,14 +1,19 @@
 # R2 File Manager
 
-A Cloudflare Worker that serves a file manager for an R2 bucket. Uploads go straight from the browser to R2 using presigned multipart URLs. There is also a terminal upload client for when a browser is not convenient.
+A Cloudflare Worker that serves a file manager for an R2 bucket, plus a second drive, **Zenith**: a self-hosted S3 server. Uploads go straight from the browser to R2 using presigned multipart URLs. There is also a terminal upload client for when a browser is not convenient.
 
 ## Layout
 - `src/worker.js`: routing and API
 - `src/config.js`: CONFIG block (edit your non-secret settings here)
-- `src/sigv4.js`: SigV4 presigned URLs
-- `src/r2.js`: R2 calls, listing, usage
-- `src/uploads.js`: multipart upload, folder delete, download URLs
-- `src/fileops.js`: move, copy, trash, restore, save text, multipart part list
+- `src/sigv4.js`: SigV4 presigned URLs (used by the R2 driver)
+- `src/storage/`: **the only code that talks to storage** (see "Storage and Zenith")
+  - `index.js`: `resolve()` decides which drive a path is on; `store(c)` is the interface every other module uses; `sys(c)` holds the app's own records (always R2); listing usage and unique names
+  - `s3.js`: the S3 operations both drivers share (list, stat, get, put, delete, copy, multipart) and the XML parsing
+  - `r2.js`: the R2 driver (presigned URLs, as before)
+  - `zenith.js`: the Zenith driver (aws4fetch, path-style) and the signed chunk URLs
+- `src/vendor/aws4fetch.js`: aws4fetch 1.0.20, copied unchanged (MIT), so deploys need no `npm install`
+- `src/uploads.js`: multipart upload, the Zenith chunk route, folder delete
+- `src/fileops.js`: move, copy, trash, restore, save text, multipart part list, moving between R2 and Zenith
 - `src/links.js`: short links on the public host
 - `src/notes.js`: per-file notes
 - `src/urlfetch.js`: "save from a link"
@@ -21,17 +26,43 @@ A Cloudflare Worker that serves a file manager for an R2 bucket. Uploads go stra
 - `public/install/`: `upload.sh` and `upload.ps1`, the terminal clients
 - `.gitattributes`: keeps `*.sh` checked out with LF endings, so the bash script still runs after a clone on Windows
 
+## Storage and Zenith
+
+Every file has a **path**. A path that starts with `zenith:/` is on Zenith; every other path is in R2:
+
+| Path | Drive | Key on that drive |
+| --- | --- | --- |
+| `photos/a.jpg` | R2 | `photos/a.jpg` |
+| `zenith:/photos/a.jpg` | Zenith | `photos/a.jpg` |
+
+`resolve()` in `src/storage/index.js` is the only place that decides this. Every route, the public host, short links, notes, upload from a link and the terminal client go through `store(c)` with paths, so they work the same on both drives. File and folder names made in the app can never contain `:`, so no R2 folder can clash with `zenith:/`. The app's own records (`.links/`, `.notes/`, `.system/`) always stay in R2.
+
+**Zenith** is s3proxy (filesystem backend) on the LAN, reached at `ZENITH_ENDPOINT` through a Cloudflare Tunnel. Requests are path-style (`${ZENITH_ENDPOINT}/${ZENITH_BUCKET}/<key>`), signed with SigV4 by aws4fetch (service `s3`, region `us-east-1`), with `cf: { cacheTtl: 0 }`. SigV4 is the only authentication. It needs four **secrets** in the Worker's dashboard settings: `ZENITH_ENDPOINT` (no trailing slash), `ZENITH_BUCKET`, `ZENITH_KEY` and `ZENITH_SECRET`. They are read straight from `env`. Do **not** put them in `[vars]` in `wrangler.toml` (that would replace the secrets on deploy) or in `src/config.js`. If any one is missing, Zenith is simply off and R2 is unaffected.
+
+In the web app Zenith is a card in the **Drives** row above the R2 files. Open it and everything works as in R2: upload (files, folders, paste, drag and drop, zip, from a link), new folder, new text file, view, download, edit text, notes, short links, Move to… / Copy to… (also between R2 and Zenith), with these differences:
+
+- **Every byte goes through the Worker.** Browsers never talk to Zenith, so s3proxy needs no CORS. Upload chunks go to `PUT /api/upload/data` at a signed URL, and the Worker streams each one to S3 UploadPart and returns its ETag; downloads and previews stream from `/api/read`. Chunks are capped at **95 MiB**, under the 100 MB request-body limit of Cloudflare's proxy, so a single file can be up to about 927 GB. A failed or cancelled upload is aborted, so no half-finished parts are left on the disk.
+- **No trash.** Deleting on Zenith is permanent, after a confirmation.
+- **Files added over SMB** show up the next time the folder is listed. They may have no stored content type (it is then guessed from the file name), and their ETags are not checked against R2.
+- **Short links** to Zenith files work like R2 links (`bunnxr.com/name`, `r2.bunnxr.com/name`): opening one streams the file from Zenith. When a file is moved, between drives or within one, its links follow it.
+- **Moving between R2 and Zenith** streams the file through the Worker (`POST /api/xfer`). Files up to 95 MiB go in one call; bigger ones are copied 2 × 64 MiB parts per call while the app shows progress. The source is deleted only after the copy is complete.
+- **R2 only:** the Storage figure, Largest files, Recent and the type views (Images, Videos …), the trash, and public folders.
+
+If Zenith answers 403 *SignatureDoesNotMatch*, the tunnel is probably rewriting the `Host` header: the signature covers the host in `ZENITH_ENDPOINT`.
+
 ## Terminal upload
 
 One command, no install, nothing left behind on the machine:
 
     # Linux, macOS, Git Bash or WSL
     curl -fsSL https://u.bunnxr.com | bash
+    curl -fsSL https://u.bunnxr.com/local | bash     # upload to Zenith instead
 
     # Windows PowerShell
     irm https://u.bunnxr.com | iex
+    irm https://u.bunnxr.com/local | iex             # upload to Zenith instead
 
-Both hit the same URL; the Worker picks the script from the request's User-Agent. The script asks for the upload password with hidden input, checks it against `POST /cli/verify`, then offers a prompt:
+Both hit the same URL; the Worker picks the script from the request's User-Agent. `/local` serves the same script with its two settings lines switched (`DEST` to `zenith:/`, `TARGET` to `Zenith`), so uploads go to Zenith with the same password and the same features. The script asks for the upload password with hidden input, checks it against `POST /cli/verify`, then offers a prompt:
 
 | Command | What it does |
 | --- | --- |
@@ -61,10 +92,10 @@ The terminal client is protected by a password, separate from the Cloudflare Acc
 | --- | --- |
 | `files.bunnxr.com` | the web app and `/api/*`, behind **Cloudflare Access** (SSO) |
 | `files.bunnxr.com/cli/*` | **upload password** (`Authorization: Bearer <password>`), with an Access bypass policy on the path |
-| `u.bunnxr.com` | the two install scripts, **no login and no secrets**; any path other than `/` returns 404 |
+| `u.bunnxr.com` | the two install scripts, **no login and no secrets**; `/` uploads to R2, `/local` to Zenith; any other path returns 404 |
 | `r2.bunnxr.com` | public files and expiring share links |
 
-The `/cli/*` routes are `verify`, `upload/init`, `upload/part`, `upload/complete`, `upload/abort`, `upload/parts` and `fetch-url`, all POST. There is deliberately no delete, move, trash, share, list or settings route among them: the password can add files, never remove or read them. The password is checked before the request body is read, and never logged. `/api/*` keeps its Access protection and never accepts the CLI password.
+The `/cli/*` routes are `verify`, `upload/init`, `upload/part`, `upload/complete`, `upload/abort`, `upload/parts` and `fetch-url`, all POST, plus `PUT upload/data` for Zenith chunks. That one takes no password: like an R2 presigned URL, the signed URL from `upload/part` is the permission, for one part of one upload, for `URL_EXPIRY_SECONDS`. There is deliberately no delete, move, trash, share, list or settings route among them: the password can add files, never remove or read them. The password is checked before the request body is read, and never logged. `/api/*` keeps its Access protection and never accepts the CLI password.
 
 Add a rate-limiting rule on `/cli/*` in the Cloudflare dashboard (for example 10 requests per minute per IP).
 
@@ -86,7 +117,7 @@ Add a rate-limiting rule on `/cli/*` in the Cloudflare dashboard (for example 10
 Find them under **Workers & Pages → r2-files → Observability → Logs**, and filter by field, for example `event:cli.verify.fail`. Cron runs show up in the same log stream as `cron.run`; the schedule itself and its recent invocations are under the Worker's **Settings → Trigger Events** (cron triggers), with the output in Observability → Logs. Unexpected errors still go to `console.error` and appear there too.
 
 ## Secrets (never commit them)
-Set `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ACCOUNT_ID` and `ENDPOINT` as **secrets** in the dashboard (Worker > Settings > Variables and Secrets). They override `src/config.js`. Plain-text dashboard variables are removed by `wrangler deploy` unless they are in `wrangler.toml`, so use secrets, or put non-secret values in `src/config.js`.
+Set `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ACCOUNT_ID` and `ENDPOINT` as **secrets** in the dashboard (Worker > Settings > Variables and Secrets). They override `src/config.js`. Zenith's four secrets (`ZENITH_ENDPOINT`, `ZENITH_BUCKET`, `ZENITH_KEY`, `ZENITH_SECRET`) are set the same way and have no counterpart in `src/config.js`. Plain-text dashboard variables are removed by `wrangler deploy` unless they are in `wrangler.toml`, so use secrets, or put non-secret values in `src/config.js`.
 
 The **upload password is not a secret and not in git**: it lives in the bucket at `.system/upload-auth.json` and is managed from the settings page. Nothing in `wrangler.toml` holds a secret; its only ID is the shortener's KV namespace (see "Short links on bunnxr.com"), which is not a secret.
 
@@ -111,7 +142,7 @@ The bucket CORS policy and the Access application are set up as in the setup gui
 Only the files in `public/` need to change; leave `src/` alone.
 - `style.css`: free to change (colours are CSS variables at the top; light theme only).
 - `index.html`: free to re-layout, but keep these element ids because `app.js` uses them: `logo file uploadIco btnFolder folderIco nav uSeg uTypes q searchIco searchBar crumbs folderSec folders filesTitle count sortBy sortDir btnView list drop uploads upTitle upSub upToggle upClear upBar upList modal toasts filesSec linksSec lkCount lkFilter lkClean lkRefresh lkList upSec upBody`. The storage figure is the last item of `#nav`, built by `renderNav`.
-- `app.js`: the functions `itemHtml`, `folderHtml`, `theadHtml` and `render` build the file rows and cards. Class names and `data-*` attributes there (`data-act`, `data-i`, `data-f`, `data-sort`, `data-u`, `data-up`) are used by the click handlers, so keep them.
+- `app.js`: the functions `itemHtml`, `folderItemHtml`, `driveHtml` (the Drives cards), `theadHtml` and `render` build the file rows and cards. Class names and `data-*` attributes there (`data-act`, `data-i`, `data-f`, `data-sort`, `data-u`, `data-up`) are used by the click handlers, so keep them.
 - The **Uploads** sidebar item (the upload password page) and the `#view=upload-password` route are part of the UI: the item comes from the `NAV` list and is drawn by `renderNav`, the panel is built by `renderUpAuth` into `#upBody`, and its styles are the `.upcard`, `.up-*` and `.sw` rules at the end of `style.css`. Keep them when restyling.
 - Do not add external scripts or fonts: the Content-Security-Policy in `src/pages.js` blocks them.
 

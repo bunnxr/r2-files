@@ -1,10 +1,9 @@
 // R2 File Manager: Worker entry point (routing). Static files live in /public.
 import { getConfig, configProblems } from "./config.js";
 import { HttpError, json, readJson, safeColor, validKey, validPrefix, sanitizeName, TYPES, typeOf, isInternal, logEvent } from "./util.js";
-import { presign } from "./sigv4.js";
-import { r2, listAll, bucketUsage, r2Error } from "./r2.js";
+import { store, bucketUsage, extraDrives } from "./storage/index.js";
 import { verifyAccess } from "./access.js";
-import { uploadInit, uploadComplete, deleteFolderBatch, contentDisposition } from "./uploads.js";
+import { uploadInit, uploadComplete, partTarget, uploadData, uploadAbort, deleteFolderBatch, contentDisposition } from "./uploads.js";
 import { securityPolicy, notConfiguredPage } from "./pages.js";
 import { servePublic, shareUrl, proxyRead } from "./public.js";
 import { createLink, linkInfo, removeLink, listLinks, updateLink, deleteLink, addLink, sweepExpired } from "./links.js";
@@ -28,7 +27,7 @@ async function handle(request, env, ctx) {
   // The installer host comes first: it only ever serves the two scripts from
   // /public/install, needs no R2 and no login, so it answers even while the
   // CONFIG block is still incomplete.
-  if (c.UPLOAD_HOST && host === c.UPLOAD_HOST) return serveScript(request, env, url);
+  if (c.UPLOAD_HOST && host === c.UPLOAD_HOST) return serveScript(request, env, url, c);
 
   const isPublicHost = !!c.PUBLIC_HOST && host === c.PUBLIC_HOST;
   // LINK_HOST (bunnxr.com) is routed to the shortener Worker, never to this one; requests for it only
@@ -80,15 +79,16 @@ async function handle(request, env, ctx) {
     if (origin && origin !== url.origin) throw new HttpError(403, "Cross-origin requests are not allowed.");
   }
 
+  // Paths in every route below may be in R2 or on Zenith ("zenith:/…"): src/storage/index.js decides.
   switch (request.method + " " + url.pathname) {
     case "GET /api/list": {
       const prefix = url.searchParams.get("prefix") ?? "";
       if (!validPrefix(prefix) || isInternal(prefix)) throw new HttpError(400, "Invalid folder path.");
-      const r = await listAll(c, { prefix, delimiter: "/", maxPages: 20 });
+      const r = await store(c).list({ prefix, delimiter: "/", maxPages: 20 });
       return json({ prefix, folders: r.folders.filter((f) => f !== ".trash/" && !isInternal(f)), files: r.files.filter((f) => f.key !== prefix && !isInternal(f.key)), truncated: r.truncated });
     }
     case "GET /api/config":
-      return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0f766e"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW, publicHost: c.PUBLIC_HOST, linkHost: c.LINK_HOST || c.PUBLIC_HOST, publicFolders: c.PUBLIC_FOLDER_LIST, trashDays: c.TRASH_DAYS });
+      return json({ title: c.SITE_TITLE, accent: safeColor(c.ACCENT, "#0f766e"), parallel: c.PARALLEL_UPLOADS, retries: c.CHUNK_RETRIES, view: c.DEFAULT_VIEW, publicHost: c.PUBLIC_HOST, linkHost: c.LINK_HOST || c.PUBLIC_HOST, publicFolders: c.PUBLIC_FOLDER_LIST, trashDays: c.TRASH_DAYS, drives: extraDrives(c) });
     case "GET /api/usage": {
       const u = await bucketUsage(c);
       return json({ used: u.used, count: u.count, partial: u.partial, byType: u.byType });
@@ -108,20 +108,15 @@ async function handle(request, env, ctx) {
       if (!validPrefix(prefix) || isInternal(prefix)) throw new HttpError(400, "Invalid folder path.");
       const key = prefix + sanitizeName(b.name) + "/";
       if (!validKey(key, "folder")) throw new HttpError(400, "That folder name is not allowed.");
-      const res = await r2(c, "PUT", key, { body: "" });
-      if (!res.ok) throw new HttpError(502, r2Error(res));
+      await store(c).mkdir(key);
       return json({ ok: true, key });
     }
     case "POST /api/upload/init":
       return json(await uploadInit(c, await readJson(request)));
-    case "POST /api/upload/part": {
-      const b = await readJson(request);
-      const n = Number(b.partNumber);
-      if (!validKey(b.key, "file") || isInternal(b.key) || typeof b.uploadId !== "string" || !b.uploadId || !Number.isInteger(n) || n < 1 || n > 10000) {
-        throw new HttpError(400, "Invalid request.");
-      }
-      return json({ url: await presign(c, "PUT", b.key, { query: { partNumber: String(n), uploadId: b.uploadId } }) });
-    }
+    case "POST /api/upload/part":
+      return json(await partTarget(c, await readJson(request), "/api/upload/data"));
+    case "PUT /api/upload/data": // a chunk for Zenith, sent to the signed URL from /api/upload/part
+      return uploadData(c, request, url);
     case "POST /api/upload/complete": {
       const b = await readJson(request);
       try {
@@ -133,26 +128,21 @@ async function handle(request, env, ctx) {
         throw e;
       }
     }
-    case "POST /api/upload/abort": {
-      const b = await readJson(request);
-      if (!validKey(b.key, "file") || isInternal(b.key) || typeof b.uploadId !== "string" || !b.uploadId) throw new HttpError(400, "Invalid request.");
-      await r2(c, "DELETE", b.key, { query: { uploadId: b.uploadId } });
-      return json({ ok: true });
-    }
+    case "POST /api/upload/abort":
+      return json(await uploadAbort(c, await readJson(request)));
     case "POST /api/delete": {
       const b = await readJson(request);
       if (!validKey(b.key, "file") || isInternal(b.key)) throw new HttpError(400, "Invalid file.");
-      const res = await r2(c, "DELETE", b.key);
-      if (!res.ok && res.status !== 404) throw new HttpError(502, r2Error(res));
+      await store(c).remove(b.key);
       await dropNotes(c, [b.key]);
       return json({ ok: true });
     }
-    case "POST /api/delete-folder":
+    case "POST /api/delete-folder": // permanent; used for folders on Zenith, which has no trash
       return json(await deleteFolderBatch(c, (await readJson(request)).prefix));
     case "POST /api/url": {
       const b = await readJson(request);
       if (!validKey(b.key, "file") || isInternal(b.key)) throw new HttpError(400, "Invalid file.");
-      const u = await presign(c, "GET", b.key, { query: { "response-content-disposition": contentDisposition(b.mode, b.key) } });
+      const u = await store(c).openUrl(b.key, b.mode, contentDisposition(b.mode, b.key));
       return json({ url: u, expiresIn: c.URL_EXPIRY_SECONDS });
     }
     case "POST /api/share": {
@@ -165,7 +155,7 @@ async function handle(request, env, ctx) {
     case "GET /api/read": {
       const key = url.searchParams.get("key");
       if (!validKey(key, "file") || isInternal(key)) throw new HttpError(400, "Invalid file.");
-      return proxyRead(c, request, key);
+      return proxyRead(c, request, key, url);
     }
     case "POST /api/link": {
       const b = await readJson(request);
@@ -208,6 +198,8 @@ async function handle(request, env, ctx) {
     }
     case "POST /api/move":
       return json(await ops.moveBatch(c, await readJson(request)));
+    case "POST /api/xfer": // move or copy one file between R2 and Zenith, step by step
+      return json(await ops.xferStep(c, await readJson(request)));
     case "POST /api/trash":
       return json(await ops.trashBatch(c, await readJson(request)));
     case "POST /api/trash-folder":

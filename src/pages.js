@@ -5,13 +5,14 @@ import { escHtml } from "./util.js";
 // ---------------------------------------------------------------------
 function securityPolicy(c) {
   const r2o = new URL(c.ENDPOINT).origin;
+  // 'self' in media-src and frame-src: files on Zenith are played and shown from /api/read on this origin
   return [
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: " + r2o,
-    "media-src blob: " + r2o,
-    "frame-src blob: " + r2o,
+    "media-src 'self' blob: " + r2o,
+    "frame-src 'self' blob: " + r2o,
     "connect-src 'self' " + r2o,
     "base-uri 'none'",
     "form-action 'none'",

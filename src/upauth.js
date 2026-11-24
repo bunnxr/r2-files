@@ -9,7 +9,7 @@
 //  util.js), so the file cannot be touched from the UI or the public host.
 // ---------------------------------------------------------------------
 import { HttpError, logEvent } from "./util.js";
-import { r2, r2Error } from "./r2.js";
+import { sys } from "./storage/index.js";
 
 const AUTH_KEY = ".system/upload-auth.json";
 const SIX_DAYS = 6 * 24 * 60 * 60 * 1000;
@@ -61,9 +61,7 @@ const clean = (o) => ({
 });
 
 async function writeAuth(c, a) {
-  const body = JSON.stringify(clean(a));
-  const res = await r2(c, "PUT", AUTH_KEY, { headers: { "content-type": "application/json" }, body });
-  if (!res.ok) throw new HttpError(502, r2Error(res));
+  await sys(c).write(AUTH_KEY, JSON.stringify(clean(a)), "application/json");
   return clean(a);
 }
 
@@ -77,11 +75,10 @@ async function createAuth(c, why) {
 }
 
 async function readAuth(c) {
-  const res = await r2(c, "GET", AUTH_KEY);
-  if (res.status === 404) return createAuth(c, "first-use");
-  if (!res.ok) throw new HttpError(502, r2Error(res));
+  const text = await sys(c).read(AUTH_KEY);
+  if (text === null) return createAuth(c, "first-use");
   try {
-    const o = JSON.parse(res.text);
+    const o = JSON.parse(text);
     if (o && typeof o === "object" && !Array.isArray(o) && validPassword(o.password)) return clean(o);
   } catch (e) { /* unreadable: fall through and start again */ }
   return createAuth(c, "repair"); // the file was damaged or hand-edited into something unusable

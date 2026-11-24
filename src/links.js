@@ -2,12 +2,14 @@
 // The URL never changes whatever expiry you pick, so the expiry lives on the server.
 // Records are tiny JSON objects kept in the bucket itself (hidden folder .links/), so nothing extra to set up:
 //   .links/n/<name>   name  -> { key, exp, mode? }   (used when the link is opened)
-//   .links/k/<hash>   file  -> { name, key, exp, dl? } (the file's main link for the Share dialog;
-//                                                     dl = its separate download link, if any)
+//   .links/k/<hash>   file  -> { name, key, exp, dl?, x? } (the file's main link for the Share dialog;
+//                                                     dl = its separate download link, if any;
+//                                                     x = its other links, so they follow the file when it moves)
+// The file key is a path: it may be in R2 or on Zenith ("zenith:/…"); the records always live in R2.
 // exp is a unix time in seconds, or 0 for a link that never expires.
 // mode: "view" = open in the browser, "download" = always download, none = browser decides.
 import { HttpError, validKey, sanitizeName, isInternal } from "./util.js";
-import { r2, r2Error, parseList } from "./r2.js";
+import { sys, store } from "./storage/index.js";
 
 const enc = new TextEncoder();
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -19,16 +21,14 @@ const alive = (r) => !!r && (!r.exp || r.exp * 1000 > Date.now());
 const urlFor = (c, name) => "https://" + (c.LINK_HOST || c.PUBLIC_HOST) + "/" + encodeURIComponent(name);
 
 async function read(c, obj) {
-  const res = await r2(c, "GET", obj);
-  if (res.status === 404) return null;
-  if (!res.ok) throw new HttpError(502, r2Error(res));
-  try { return JSON.parse(res.text); } catch (e) { return null; }
+  const text = await sys(c).read(obj);
+  if (text === null) return null;
+  try { return JSON.parse(text); } catch (e) { return null; }
 }
 async function write(c, obj, rec) {
-  const res = await r2(c, "PUT", obj, { headers: { "content-type": "application/json" }, body: JSON.stringify(rec) });
-  if (!res.ok) throw new HttpError(502, r2Error(res));
+  await sys(c).write(obj, JSON.stringify(rec), "application/json");
 }
-async function drop(c, obj) { await r2(c, "DELETE", obj); }
+async function drop(c, obj) { await sys(c).remove(obj); }
 
 export async function lookupLink(c, name) {
   if (!validKey(nameObj(name), "file")) return null;
@@ -94,6 +94,7 @@ export async function createLink(c, key, seconds, mode) {
   const ptr = { name, key, exp, t: now };
   let dl = null;
   if (prev && prev.dl) ptr.dl = prev.dl; // remember the download companion even when not asked for now
+  if (prev && Array.isArray(prev.x)) ptr.x = prev.x;
   if (mode === "both") {
     let dn = null;
     if (prev && prev.dl && prev.dl !== name) { const n = await lookupLink(c, prev.dl); if ((!n || n.key === key) && !(await inShortener(c, prev.dl))) dn = prev.dl; }
@@ -117,7 +118,7 @@ export async function removeLink(c, key) {
     const n = await lookupLink(c, nm);
     if (n && n.key === key) await drop(c, nameObj(nm));
   }
-  await drop(c, ko);
+  if (k && Array.isArray(k.x) && k.x.length) await write(c, ko, { key, x: k.x }); else await drop(c, ko);
   return { ok: true };
 }
 // A link stops being its file's main link (renamed, re-pointed or deleted). The pointer to the
@@ -126,7 +127,48 @@ async function unsetMain(c, key, name) {
   const ko = await keyObj(key);
   const k = await read(c, ko);
   if (!k || k.name !== name) return;
-  if (k.dl && k.dl !== name) await write(c, ko, { key, dl: k.dl }); else await drop(c, ko);
+  const rest = { key };
+  if (k.dl && k.dl !== name) rest.dl = k.dl;
+  if (Array.isArray(k.x) && k.x.length) rest.x = k.x;
+  if (rest.dl || rest.x) await write(c, ko, rest); else await drop(c, ko);
+}
+
+// Remember a link on its file's pointer (field x), so the link follows the file when it is moved
+const MAX_X = 40;
+async function remember(c, key, name) {
+  try {
+    const ko = await keyObj(key);
+    const k = (await read(c, ko)) || { key };
+    const x = Array.isArray(k.x) ? k.x.filter((n) => n !== name) : [];
+    x.push(name);
+    k.x = x.slice(-MAX_X);
+    await write(c, ko, k);
+  } catch (e) { /* best effort: the link itself is saved */ }
+}
+
+// A file was moved (in R2, on Zenith or between the two): its links now open it at the new path.
+// pairs: [{ from, to, keep }]; copies (keep) are skipped, the original keeps its links.
+// Best effort, like notes: a failure never undoes the move.
+export async function carryLinks(c, pairs) {
+  if (!c.PUBLIC_HOST) return;
+  for (const p of pairs) {
+    if (p.keep || p.from === p.to) continue;
+    try {
+      const ko = await keyObj(p.from);
+      const k = await read(c, ko);
+      if (!k) continue;
+      const names = [...new Set([k.name, k.dl].concat(Array.isArray(k.x) ? k.x : []))].filter((n) => typeof n === "string" && n);
+      const moved = [];
+      for (const nm of names) {
+        const rec = await read(c, nameObj(nm));
+        if (rec && rec.key === p.from) { rec.key = p.to; await write(c, nameObj(nm), rec); moved.push(nm); }
+      }
+      const ptr = Object.assign({}, k, { key: p.to });
+      if (Array.isArray(k.x)) ptr.x = k.x.filter((n) => moved.includes(n));
+      await write(c, await keyObj(p.to), ptr);
+      await drop(c, ko);
+    } catch (e) { /* best effort */ }
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -142,18 +184,14 @@ const goodTarget = (k) => validKey(k, "file") && !k.startsWith(".trash/") && !is
 
 // One page of links. 1 list + 2 calls per link keeps a page under the Free plan's 50-subrequest cap.
 export async function listLinks(c, after) {
-  const query = { "list-type": "2", "max-keys": "20", prefix: ".links/n/" };
-  if (after) query["start-after"] = nameObj(after);
-  const res = await r2(c, "GET", "", { query });
-  if (!res.ok) throw new HttpError(502, r2Error(res));
-  const p = parseList(res.text);
+  const p = await sys(c).listPage({ prefix: ".links/n/", maxKeys: 20, startAfter: after ? nameObj(after) : undefined });
   const keys = p.files.map((f) => f.key);
   const links = await Promise.all(keys.map(async (obj) => {
     const name = obj.slice(nameObj("").length);
     const rec = await read(c, obj).catch(() => null);
     if (!rec || typeof rec.key !== "string") return { name, url: urlFor(c, name), key: "", exp: 0, t: 0, active: false, missing: true, size: 0 };
     if (!alive(rec)) { await drop(c, obj).catch(() => {}); return null; } // expired links are deleted, not listed
-    const h = await r2(c, "HEAD", rec.key).catch(() => null);
+    const h = await store(c).head(rec.key).catch(() => null); // the file may be in R2 or on Zenith
     const missing = !h || h.status === 404;
     const size = h && h.ok ? Number(h.headers.get("content-length")) || 0 : 0;
     return { name, url: urlFor(c, name), key: rec.key, exp: rec.exp || 0, t: rec.t || 0, active: alive(rec), missing, size, mode: rec.mode || "auto" };
@@ -177,7 +215,7 @@ export async function updateLink(c, b) {
   }
   if (b.key !== undefined && b.key !== rec.key) {
     if (!goodTarget(b.key)) throw new HttpError(400, "Invalid file.");
-    const h = await r2(c, "HEAD", b.key);
+    const h = await store(c).head(b.key);
     if (h.status === 404) throw new HttpError(404, "That file does not exist.");
     out.key = b.key;
   }
@@ -195,7 +233,7 @@ export async function updateLink(c, b) {
   if (newName !== name) await drop(c, nameObj(name));
   // A renamed or re-pointed link stops being its file's main link, so the next "Share link"
   // makes a fresh link for that file instead of changing this one.
-  if (newName !== name || out.key !== rec.key) await unsetMain(c, rec.key, name);
+  if (newName !== name || out.key !== rec.key) { await unsetMain(c, rec.key, name); await remember(c, out.key, newName); }
   return { name: newName, url: urlFor(c, newName), key: out.key, exp: out.exp, t: out.t, active: alive(out), mode: out.mode || "auto" };
 }
 
@@ -207,7 +245,7 @@ export async function addLink(c, b) {
   const now = Math.floor(Date.now() / 1000);
   const exp = Math.floor(Number(b.exp) || 0);
   if (exp < 0 || (exp && exp <= now) || exp > now + MAX_DAYS * 86400) throw new HttpError(400, "Pick an expiry within " + MAX_DAYS + " days, or never.");
-  const h = await r2(c, "HEAD", key);
+  const h = await store(c).head(key);
   if (h.status === 404) throw new HttpError(404, "That file does not exist.");
   let name;
   if (String(b.name ?? "").trim()) {
@@ -217,6 +255,7 @@ export async function addLink(c, b) {
   } else name = await freeName(c, key, b.mode === "download" ? "-download" : "");
   const rec = withMode({ key, exp, t: now }, b.mode);
   await write(c, nameObj(name), rec);
+  await remember(c, key, name);
   return { name, url: urlFor(c, name), key, exp, t: now, active: true, missing: false, size: Number(h.headers.get("content-length")) || 0, mode: rec.mode || "auto" };
 }
 
@@ -231,11 +270,8 @@ export async function dropExpired(c, name) {
 const SWEEP = ".links/sweep.json";
 export async function sweepExpired(c) {
   const cur = (await read(c, SWEEP).catch(() => null)) || {};
-  const query = { "list-type": "2", "max-keys": "22", prefix: ".links/n/" }; // 1 + 1 + 22 reads + up to 22 deletes + 1 = 47
-  if (cur.after) query["start-after"] = cur.after;
-  const res = await r2(c, "GET", "", { query });
-  if (!res.ok) throw new HttpError(502, r2Error(res));
-  const p = parseList(res.text);
+  // 1 + 1 + 22 reads + up to 22 deletes + 1 = 47 subrequests
+  const p = await sys(c).listPage({ prefix: ".links/n/", maxKeys: 22, startAfter: cur.after || undefined });
   const keys = p.files.map((f) => f.key);
   let deleted = 0;
   await Promise.all(keys.map(async (obj) => {

@@ -14,6 +14,28 @@ const fdate = (s) => (s ? new Date(s).toLocaleDateString(undefined, { year: 'num
 const CANCEL = new Error('Canceled');
 let V = null; // the open preview / gallery, if any
 
+/* ---------- drives ----------
+   Every path is in R2 unless it starts with the root of another drive (Zenith: "zenith:/photos/a.jpg").
+   The Worker decides that (src/storage/index.js) and sends the list of drives in /api/config; the app
+   only reads it through driveOf(), never by looking at paths itself. */
+const DRIVES = Array.isArray(BOOT.drives) ? BOOT.drives : [];
+const driveOf = (k) => DRIVES.find((d) => String(k || '').indexOf(d.root) === 0) || null; // null = R2
+const where = (k) => (driveOf(k) || { label: 'R2' }).label;
+const sameDrive = (a, b) => driveOf(a) === driveOf(b);
+// Breadcrumb pieces of a folder path: [{ name, acc }], the drive's own name first for paths on a drive
+function crumbParts(prefix) {
+  const d = driveOf(prefix), out = [];
+  let acc = d ? d.root : '';
+  if (d) out.push({ name: d.label, acc });
+  prefix.slice(acc.length).split('/').filter(Boolean).forEach((p) => { acc += p + '/'; out.push({ name: p, acc }); });
+  return out;
+}
+// A folder as people read it: "/photos/", "Zenith /photos/", "the top level", "the top level of Zenith"
+function placeOf(prefix) {
+  const d = driveOf(prefix), rest = d ? prefix.slice(d.root.length) : prefix;
+  return rest ? (d ? d.label + ' /' : '/') + rest : 'the top level' + (d ? ' of ' + d.label : '');
+}
+
 /* ---------- icons ---------- */
 const P = {
   cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
@@ -125,7 +147,7 @@ function confirmDlg(title, msg, label) {
 function askFolder() {
   return new Promise((resolve) => {
     let val = null;
-    openModal('<form class="dlg" role="dialog" aria-modal="true"><h2>New folder</h2><p>It will be created in ' + esc(S.prefix ? '/' + S.prefix : 'the top level') + '</p><input id="fn" class="field" maxlength="120" placeholder="Folder name" autocomplete="off"><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Create folder</button></div></form>', () => resolve(val));
+    openModal('<form class="dlg" role="dialog" aria-modal="true"><h2>New folder</h2><p>It will be created in ' + esc(placeOf(S.prefix)) + '</p><input id="fn" class="field" maxlength="120" placeholder="Folder name" autocomplete="off"><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Create folder</button></div></form>', () => resolve(val));
     const inp = $('#fn');
     inp.focus();
     $('form', modalEl).onsubmit = (e) => { e.preventDefault(); const v = inp.value.trim(); if (!v) { inp.focus(); return; } val = v; closeModal(); };
@@ -236,14 +258,19 @@ function itemHtml(it, i) {
 function folderItemHtml(f, i) {
   return '<div class="item go fitem" data-f="' + i + '"><div class="main"><input type="checkbox" class="sel" disabled tabindex="-1" aria-hidden="true" style="visibility:hidden">' + tile('folder', 20) + '<div class="nm"><b title="' + esc(f.name) + '">' + esc(f.name) + '</b><small class="sub"><span>Folder</span>' + (isPublicKey(f.key) ? '<span class="badge">Public</span>' : '') + '</small></div></div><span class="sz">—</span><span class="dt"></span><span class="nt blank"></span></div>';
 }
-// ── RESERVED: the previous folder look (separate "Folders" section of cards above the files). ──
-// Not used for folders any more; kept on purpose to be reused for CONNECTED DRIVES (multiple drives
-// in the web UI, e.g. a "Drives" row of cards). Pieces that belong together:
-//   public/index.html  <section id="folderSec"> with <div id="folders" class="folders">  (kept, always hidden)
-//   public/style.css   .folders, .fcard, .f-top rules  (marked "RESERVED for drives")
-//   public/app.js      folderHtml() below + the $('#folders') click handler (card opens / trash button)
-function folderHtml(f, i) {
-  return '<div class="fcard" data-f="' + i + '"><div class="f-top">' + tile('folder', 22) + '<button class="ib danger" data-act="delete" title="Move folder to trash" aria-label="Move folder ' + esc(f.name) + ' to trash">' + ico('trash', 17) + '</button></div><b title="' + esc(f.name) + '">' + esc(f.name) + '</b><small>Folder' + (isPublicKey(f.key) ? '<span class="badge">Public</span>' : '') + '</small></div>';
+// ── CONNECTED DRIVES: the row of drive cards above the R2 files (Zenith, your own server). ──
+// Shown at the top level of R2 only; clicking a card opens that drive like a folder. Pieces that belong together:
+//   public/index.html  <section id="folderSec"> with <div id="folders" class="folders">
+//   public/style.css   .folders, .fcard, .f-top rules
+//   public/app.js      driveHtml() below, renderDrives() and the $('#folders') click handler
+// data-drive = index into DRIVES.
+function driveHtml(d, i) {
+  return '<div class="fcard drive" data-drive="' + i + '" role="button" tabindex="0" title="Open ' + esc(d.label) + '"><div class="f-top">' + tile('folder', 22) + '</div><b>' + esc(d.label) + '</b><small>Your own server. Uploads here go to it, not to R2.</small></div>';
+}
+function renderDrives() {
+  const show = !S.kind && !S.prefix && DRIVES.length > 0;
+  $('#folderSec').hidden = !show;
+  if (show) $('#folders').innerHTML = DRIVES.map(driveHtml).join('');
 }
 function theadHtml() {
   const a = (k) => (S.by === k ? (S.dir > 0 ? ' ↑' : ' ↓') : '');
@@ -253,13 +280,11 @@ function theadHtml() {
 function renderCrumbs() {
   const el = $('#crumbs');
   el.hidden = !(S.prefix || S.kind);
-  const parts = S.prefix.split('/').filter(Boolean);
-  let acc = '';
+  const parts = crumbParts(S.prefix);
   let h = '<a href="#">' + esc(BOOT.title) + '</a>';
   if (S.kind) h += '<span class="sep">' + ico('chev', 15) + '</span><span class="cur">' + esc(KIND_TITLE[S.kind]) + '</span>';
   parts.forEach((p, i) => {
-    acc += p + '/';
-    h += '<span class="sep">' + ico('chev', 15) + '</span>' + (i === parts.length - 1 ? '<span class="cur">' + esc(p) + '</span>' : '<a href="#' + esc(encodeURIComponent(acc)) + '">' + esc(p) + '</a>');
+    h += '<span class="sep">' + ico('chev', 15) + '</span>' + (i === parts.length - 1 ? '<span class="cur">' + esc(p.name) + '</span>' : '<a href="#' + esc(encodeURIComponent(p.acc)) + '">' + esc(p.name) + '</a>');
   });
   el.innerHTML = h;
 }
@@ -300,14 +325,15 @@ function render() {
   $('#trashbar').hidden = S.kind !== 'trash';
   $('#trashText').textContent = 'Deleted files stay here for ' + BOOT.trashDays + ' days, then they are removed automatically.';
   const list = $('#list'), typeMode = !!S.kind;
-  $('#filesTitle').textContent = typeMode ? KIND_TITLE[S.kind] : 'Files';
+  $('#filesTitle').textContent = typeMode ? KIND_TITLE[S.kind] : driveOf(S.prefix) ? 'Files on ' + where(S.prefix) : 'Files';
+  renderDrives();
   if (S.loading) {
     let h = '';
     for (let n = 0; n < 6; n++) h += '<div class="item"><div class="main"><span class="tile sk"></span><div class="nm" style="flex:1"><b class="sk" style="height:12px;width:60%;margin-bottom:7px"></b><small class="sk" style="height:10px;width:35%"></small></div></div></div>';
-    $('#folderSec').hidden = true; list.innerHTML = h; $('#count').textContent = ''; return;
+    list.innerHTML = h; $('#count').textContent = ''; return;
   }
   if (S.error) {
-    $('#folderSec').hidden = true; $('#count').textContent = '';
+    $('#count').textContent = '';
     list.innerHTML = '<div class="empty"><h3>Could not load this view</h3><p>' + esc(S.error) + '</p><button class="btn primary" data-act="retry">Try again</button></div>';
     return;
   }
@@ -315,7 +341,6 @@ function render() {
   S.sel.forEach((k) => { if (!have.has(k)) S.sel.delete(k); });
   const v = filtered();
   S.shown = v.files; S.shownFolders = v.folders;
-  $('#folderSec').hidden = true; // RESERVED for drives (see folderHtml); folders now live in #list
   if (v.files.length || v.folders.length) list.innerHTML = (S.view === 'list' ? theadHtml() : '') + v.folders.map(folderItemHtml).join('') + v.files.map(itemHtml).join('');
   else if (S.q) list.innerHTML = '<div class="empty">' + tile('file', 28) + '<h3>No matches</h3><p>Nothing here matches “' + esc(S.q) + '”.</p></div>';
   else if (typeMode) list.innerHTML = '<div class="empty">' + tile('file', 28) + '<h3>Nothing here yet</h3><p>Files of this type will show up here.</p></div>';
@@ -330,12 +355,10 @@ $('#q').addEventListener('input', (e) => { S.q = e.target.value; render(); });
 $('#sortBy').addEventListener('change', (e) => { setSort(e.target.value, S.dir); render(); });
 $('#sortDir').onclick = () => { setSort(S.by, -S.dir); render(); };
 $('#btnView').addEventListener('click', render);
-// RESERVED for drives: click handler of the old folder cards in #folders (see folderHtml)
-$('#folders').addEventListener('click', (e) => {
-  const row = e.target.closest('[data-f]'); if (!row) return;
-  const f = S.shownFolders[+row.dataset.f]; if (!f) return;
-  if (e.target.closest('[data-act=delete]')) del(f); else go(f.key);
-});
+// Drive cards (see driveHtml): open the drive like a folder
+const openDriveCard = (e) => { const card = e.target.closest('[data-drive]'); const d = card && DRIVES[+card.dataset.drive]; if (d) go(d.root); };
+$('#folders').addEventListener('click', openDriveCard);
+$('#folders').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDriveCard(e); } });
 $('#list').addEventListener('click', (e) => {
   if (e.target.closest('[data-selall]')) { selectAll(e.target.checked); return; }
   const s = e.target.closest('[data-sort]');
@@ -398,8 +421,8 @@ function putPart(it, url, blob, onProg) {
       if (x.status >= 200 && x.status < 300) {
         const tag = x.getResponseHeader('ETag');
         if (tag) resolve(tag);
-        else { const er = new Error('R2 did not return an ETag. Add ETag to ExposeHeaders in the bucket CORS policy.'); er.fatal = true; reject(er); }
-      } else reject(new Error('R2 answered with HTTP ' + x.status + (x.status === 403 ? ' (signature or permissions problem)' : '')));
+        else { const er = new Error(driveOf(it.key) ? where(it.key) + ' did not return an ETag.' : 'R2 did not return an ETag. Add ETag to ExposeHeaders in the bucket CORS policy.'); er.fatal = true; reject(er); }
+      } else reject(new Error(where(it.key) + ' answered with HTTP ' + x.status + (x.status === 403 ? ' (signature or permissions problem)' : '')));
     };
     x.onerror = () => { it.xhrs.delete(x); reject(new Error('Network or CORS error while sending a chunk')); };
     x.onabort = () => { it.xhrs.delete(x); reject(CANCEL); };
@@ -433,15 +456,18 @@ async function uploadFile(it) {
   renderUploads();
   let init = null;
   try {
-    // Unfinished upload of this exact file (same name, size and date)? Ask R2 which chunks it already has.
+    // Unfinished upload of this exact file (same name, size and date)? Ask the storage which chunks it already has.
     let have = new Map();
     const rec = resumeLoad()[fpOf(it)];
-    if (rec && rec.uploadId) {
+    if (rec && rec.uploadId && sameDrive(rec.key, it.prefix)) { // never continue an R2 upload on Zenith or the other way round
       try {
         const r = await api('/api/upload/parts', { key: rec.key, uploadId: rec.uploadId });
         r.parts.forEach((p) => have.set(p.n, p));
         init = { mode: 'multipart', key: rec.key, uploadId: rec.uploadId, partSize: rec.partSize, parts: rec.parts };
       } catch (e) { resumeDrop(it); init = null; have = new Map(); }
+    } else if (rec && rec.uploadId) { // an unfinished upload of this file on the other drive: throw its parts away
+      api('/api/upload/abort', { key: rec.key, uploadId: rec.uploadId }).catch(() => {});
+      resumeDrop(it);
     }
     if (!init) {
       init = await api('/api/upload/init', { prefix: it.prefix, rel: it.rel, name: it.file.name, size: it.file.size, type: it.file.type || '' });
@@ -590,6 +616,7 @@ function renderSel() {
   $('#selClear').hidden = !n;
   ['selDl', 'selZip', 'selMove', 'selCopy', 'selDel'].forEach((id) => { $('#' + id).hidden = tr || !n; });
   ['selRestore', 'selPurge'].forEach((id) => { $('#' + id).hidden = !tr || !n; });
+  $('#selZip').textContent = 'Save zip in ' + where(S.kind ? '' : S.prefix);
   if (n) { let sz = 0; S.files.forEach((f) => { if (S.sel.has(f.key)) sz += f.size; }); $('#selCount').textContent = n + (n === 1 ? ' file selected' : ' files selected') + ' (' + fmt(sz) + ')'; }
   if (!n) $('#selCount').textContent = 'Tap files to select them';
   const all = $('[data-selall]');
@@ -637,7 +664,7 @@ async function zipSelected(toDevice) {
   if (!HAS_STREAMS) { toast('Your browser is too old for zipping (needs Chrome 103, Safari 16.4 or Firefox 113 or newer).', 'err'); return; }
   const prefix = S.prefix;
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
-  const name = toDevice ? 'files-' + stamp : await askName('Save a zip in R2', 'The zip will be saved in ' + (prefix ? '/' + prefix : 'the top level') + '.', 'archive.zip', 'Create zip');
+  const name = toDevice ? 'files-' + stamp : await askName('Save a zip in ' + where(prefix), 'The zip will be saved in ' + placeOf(prefix) + '.', 'archive.zip', 'Create zip');
   if (!name) return;
   const zname = /\.zip$/i.test(name) ? name : name + '.zip';
   const j = startJob('Creating ' + zname);
@@ -763,7 +790,7 @@ async function arcExtract() {
   if (!list.length) return;
   const dest = A.it.key.slice(0, A.it.key.lastIndexOf('/') + 1);
   const size = list.reduce((n, e) => n + e.usize, 0);
-  const ok = await confirmDlg('Extract here?', 'Extract ' + list.length + (list.length === 1 ? ' file' : ' files') + ' (' + fmt(size) + ') into ' + (dest ? '/' + dest : 'the top level') + '? Folder structure is kept and existing files are never overwritten.', 'Extract');
+  const ok = await confirmDlg('Extract here?', 'Extract ' + list.length + (list.length === 1 ? ' file' : ' files') + ' (' + fmt(size) + ') into ' + placeOf(dest) + '? Folder structure is kept and existing files are never overwritten.', 'Extract');
   if (!ok) { showArc(); return; }
   arc = null;
   const j = startJob('Extracting ' + A.it.name);
@@ -837,6 +864,7 @@ function report(verb, r) {
 /* --- trash --- */
 async function del(it) {
   if (S.kind === 'trash') return purgeItems([it]);
+  if (driveOf(it.key)) return deleteForever([it]); // Zenith has no trash
   const isF = it.type === 'folder';
   const ok = await confirmDlg(isF ? 'Move folder to trash?' : 'Move to trash?', (isF ? '“' + it.name + '” and everything inside it' : '“' + it.name + '”') + ' will be moved to the trash. You can restore it for ' + BOOT.trashDays + ' days.', 'Move to trash');
   if (!ok) return;
@@ -875,6 +903,23 @@ async function purgeItems(list) {
   if (!ok) return;
   report('Deleted', await runBatches('Deleting forever', list, 1, async (ch) => { await api('/api/delete', { key: ch[0].key }); return {}; }));
 }
+// Files and folders on Zenith (your own server) are deleted for good: it has no trash.
+async function deleteForever(list) {
+  if (!list.length) return;
+  const one = list.length === 1 ? list[0] : null, isF = !!one && one.type === 'folder';
+  const what = one ? '“' + one.name + '”' + (isF ? ' and everything inside it' : '') : list.length + ' files';
+  const ok = await confirmDlg('Delete permanently?', what + ' will be deleted from ' + where(list[0].key) + ' for good. Files there have no trash, so this cannot be undone.', 'Delete permanently');
+  if (!ok) return;
+  if (!isF) { report('Deleted', await runBatches('Deleting', list, 1, async (ch) => { await api('/api/delete', { key: ch[0].key }); return {}; })); return; }
+  const j = startJob('Deleting “' + one.name + '”');
+  if (!j) return;
+  let n = 0;
+  try {
+    for (;;) { if (j.canceled) break; const r = await api('/api/delete-folder', { prefix: one.key }); if (!r.deleted) break; n += r.deleted; updateJob(n + ' items deleted', null); }
+    toast(j.canceled ? 'Stopped after ' + n + ' items.' : 'Folder deleted.', j.canceled ? 'info' : 'ok');
+  } catch (e) { toast(e.message, 'err', 9000); }
+  endJob(); setSelMode(false); load(true);
+}
 async function emptyTrash() {
   const ok = await confirmDlg('Empty the trash?', 'Everything in the trash will be permanently deleted.', 'Empty trash');
   if (!ok) return;
@@ -894,14 +939,16 @@ function pickFolder(title, label, start) {
   return new Promise((resolve) => {
     let dir = start || '', val = null;
     const draw = async () => {
-      let cr = '<a data-d="">' + esc(BOOT.title) + '</a>', acc = '';
-      dir.split('/').filter(Boolean).forEach((p) => { acc += p + '/'; cr += '<span class="sep">' + ico('chev', 14) + '</span><a data-d="' + esc(acc) + '">' + esc(p) + '</a>'; });
+      let cr = '<a data-d="">' + esc(BOOT.title) + '</a>';
+      crumbParts(dir).forEach((p) => { cr += '<span class="sep">' + ico('chev', 14) + '</span><a data-d="' + esc(p.acc) + '">' + esc(p.name) + '</a>'; });
       modalEl.innerHTML = '<div class="dlg pick" role="dialog" aria-modal="true"><h2>' + esc(title) + '</h2><div class="arc-crumbs">' + cr + '</div><div class="pk-list" id="pkList"><div class="spin" style="margin:28px auto"></div></div><div class="dlg-acts"><button class="btn" data-x="no">Cancel</button><button class="btn primary" data-x="ok">' + esc(label) + '</button></div></div>';
       const mine = dir;
       try {
         const d = await api('/api/list?prefix=' + encodeURIComponent(dir));
         if (mine !== dir || !$('#pkList')) return;
-        $('#pkList').innerHTML = d.folders.length ? d.folders.map((f) => '<div class="pk-row" data-d="' + esc(f) + '">' + ico('folder', 18) + '<span>' + esc(f.slice(dir.length).replace(/\/$/, '')) + '</span></div>').join('') : '<div class="empty" style="padding:28px 12px"><p>No folders in here. You can choose this one.</p></div>';
+        const rows = (dir ? [] : DRIVES.map((dv) => '<div class="pk-row" data-d="' + esc(dv.root) + '">' + ico('database', 18) + '<span>' + esc(dv.label) + '</span></div>'))
+          .concat(d.folders.map((f) => '<div class="pk-row" data-d="' + esc(f) + '">' + ico('folder', 18) + '<span>' + esc(f.slice(dir.length).replace(/\/$/, '')) + '</span></div>'));
+        $('#pkList').innerHTML = rows.length ? rows.join('') : '<div class="empty" style="padding:28px 12px"><p>No folders in here. You can choose this one.</p></div>';
       } catch (e) { if ($('#pkList')) $('#pkList').innerHTML = '<div class="empty"><p>' + esc(e.message) + '</p></div>'; }
     };
     openModal('', () => resolve(val));
@@ -921,7 +968,46 @@ async function moveFiles(list, mode) {
   const copy = mode === 'copy';
   const dest = await pickFolder(copy ? 'Copy to…' : 'Move to…', copy ? 'Copy here' : 'Move here', S.kind ? '' : S.prefix);
   if (dest === null) return;
-  report(copy ? 'Copied' : 'Moved', await runBatches((copy ? 'Copying ' : 'Moving ') + list.length + (list.length === 1 ? ' file' : ' files'), list, 8, (ch) => api('/api/move', { keys: ch.map((f) => f.key), dest, mode })));
+  // Within one drive the storage copies by itself; between R2 and Zenith the Worker streams each file
+  const same = list.filter((f) => sameDrive(f.key, dest)), cross = list.filter((f) => !sameDrive(f.key, dest));
+  let r = { done: 0, errors: [], canceled: false };
+  // 4 files per call (the server allows 8) leaves room in each request for updating the files' links
+  if (same.length) r = await runBatches((copy ? 'Copying ' : 'Moving ') + same.length + (same.length === 1 ? ' file' : ' files'), same, 4, (ch) => api('/api/move', { keys: ch.map((f) => f.key), dest, mode }));
+  if (r && cross.length && !r.canceled) {
+    const x = await xferFiles(cross, dest, mode);
+    if (x) r = { done: r.done + x.done, errors: r.errors.concat(x.errors), canceled: x.canceled };
+  }
+  report(copy ? 'Copied' : 'Moved', r);
+}
+// Move or copy files between R2 and Zenith, one at a time; big files take several calls (POST /api/xfer)
+async function xferFiles(list, dest, mode) {
+  const copy = mode === 'copy', j = startJob((copy ? 'Copying to ' : 'Moving to ') + where(dest));
+  if (!j) return null;
+  const total = list.reduce((n, f) => n + (f.size || 0), 0);
+  let before = 0, done = 0;
+  const errors = [];
+  const pct = (b) => (total ? Math.min(99, ((before + b) / total) * 100) : null);
+  for (let i = 0; i < list.length && !j.canceled; i++) {
+    const f = list[i], who = f.name + (list.length > 1 ? ' (' + (i + 1) + ' of ' + list.length + ')' : '');
+    let job = null;
+    try {
+      updateJob(who, pct(0));
+      let r = await api('/api/xfer', { from: f.key, dest, mode });
+      while (!r.done) {
+        job = r.job;
+        if (j.canceled) break;
+        updateJob(who + ': ' + fmt(r.copied) + ' of ' + fmt(job.size), pct(r.copied));
+        r = await api('/api/xfer', { job });
+      }
+      if (r.done) { done++; job = null; }
+    } catch (e) { errors.push({ error: f.name + ': ' + e.message }); }
+    // stopped half-way (canceled, or the connection dropped): throw the unfinished copy away
+    if (job) api('/api/upload/abort', { key: job.to, uploadId: job.uploadId }).catch(() => {});
+    before += f.size || 0;
+  }
+  const canceled = j.canceled;
+  endJob();
+  return { done, errors: errors.map((e) => e.error), canceled };
 }
 
 /* --- share links --- */
@@ -1130,15 +1216,15 @@ function pickFile(title, start) {
   return new Promise((resolve) => {
     let dir = start || '', val = null;
     const draw = async () => {
-      let cr = '<a data-d="">' + esc(BOOT.title) + '</a>', acc = '';
-      dir.split('/').filter(Boolean).forEach((p) => { acc += p + '/'; cr += '<span class="sep">' + ico('chev', 14) + '</span><a data-d="' + esc(acc) + '">' + esc(p) + '</a>'; });
+      let cr = '<a data-d="">' + esc(BOOT.title) + '</a>';
+      crumbParts(dir).forEach((p) => { cr += '<span class="sep">' + ico('chev', 14) + '</span><a data-d="' + esc(p.acc) + '">' + esc(p.name) + '</a>'; });
       modalEl.innerHTML = '<div class="dlg pick" role="dialog" aria-modal="true"><h2>' + esc(title) + '</h2><div class="arc-crumbs">' + cr + '</div><div class="pk-list" id="pkList"><div class="spin" style="margin:28px auto"></div></div><div class="dlg-acts"><button class="btn" data-x="no">Cancel</button></div></div>';
       const mine = dir;
       try {
         const d = await api('/api/list?prefix=' + encodeURIComponent(dir));
         if (mine !== dir || !$('#pkList')) return;
-        const rows = d.folders.map((f) => '<div class="pk-row" data-d="' + esc(f) + '">' + ico('folder', 18) + '<span>' + esc(f.slice(dir.length).replace(/\/$/, '')) + '</span></div>')
-          .concat(d.files.filter((f) => !f.key.endsWith('/')).map((f) => { const n = f.key.slice(dir.length); return '<div class="pk-row" data-k="' + esc(f.key) + '">' + ico(GLYPH[kindOf(n)], 18) + '<span>' + esc(n) + '</span><small class="pk-sz">' + fmt(f.size) + '</small></div>'; }));
+        const rows = (dir ? [] : DRIVES.map((dv) => '<div class="pk-row" data-d="' + esc(dv.root) + '">' + ico('database', 18) + '<span>' + esc(dv.label) + '</span></div>')).concat(d.folders.map((f) => '<div class="pk-row" data-d="' + esc(f) + '">' + ico('folder', 18) + '<span>' + esc(f.slice(dir.length).replace(/\/$/, '')) + '</span></div>')
+          .concat(d.files.filter((f) => !f.key.endsWith('/')).map((f) => { const n = f.key.slice(dir.length); return '<div class="pk-row" data-k="' + esc(f.key) + '">' + ico(GLYPH[kindOf(n)], 18) + '<span>' + esc(n) + '</span><small class="pk-sz">' + fmt(f.size) + '</small></div>'; })));
         $('#pkList').innerHTML = rows.length ? rows.join('') : '<div class="empty" style="padding:28px 12px"><p>This folder is empty.</p></div>';
       } catch (e) { if ($('#pkList')) $('#pkList').innerHTML = '<div class="empty"><p>' + esc(e.message) + '</p></div>'; }
     };
@@ -1218,7 +1304,7 @@ function fileRows(it) {
   rows.push(['download', 'download', 'Download'], '-', ['share', 'link', 'Share link…']);
   if (isPublicKey(it.key)) rows.push(['public', 'globe', 'Copy public link']);
   if (isEditable(it.name, it.size)) rows.push(['edit', 'edit', 'Edit text']);
-  rows.push(['note', 'note', S.notes[it.key] ? 'Edit note…' : 'Add note…'], ['select', 'check', 'Select'], '-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['delete', 'trash', 'Move to trash', true]);
+  rows.push(['note', 'note', S.notes[it.key] ? 'Edit note…' : 'Add note…'], ['select', 'check', 'Select'], '-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['delete', 'trash', driveOf(it.key) ? 'Delete permanently' : 'Move to trash', true]);
   return rows;
 }
 function runFileAction(a, it) {
@@ -1359,11 +1445,11 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') navV(-1); else if (e.key === 'ArrowRight') navV(1);
 });
 
-/* --- upload from a link (the Worker downloads it and streams it into R2) --- */
+/* --- upload from a link (the Worker downloads it and streams it into R2, or Zenith when viewing a Zenith folder) --- */
 function askUrl() {
   return new Promise((resolve) => {
     let val = null;
-    openModal('<form class="dlg" role="dialog" aria-modal="true"><h2>Save a link to R2</h2><p>The server downloads the file and saves it in ' + esc(S.prefix && !S.kind ? '/' + S.prefix : 'the top level') + '.</p><input id="uu" class="field" type="url" placeholder="https://example.com/file.zip" autocomplete="off"><input id="un" class="field" placeholder="File name (optional)" maxlength="120" autocomplete="off"><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Save to R2</button></div></form>', () => resolve(val));
+    openModal('<form class="dlg" role="dialog" aria-modal="true"><h2>Save a link to ' + esc(where(S.kind ? '' : S.prefix)) + '</h2><p>The server downloads the file and saves it in ' + esc(placeOf(S.kind ? '' : S.prefix)) + '.</p><input id="uu" class="field" type="url" placeholder="https://example.com/file.zip" autocomplete="off"><input id="un" class="field" placeholder="File name (optional)" maxlength="120" autocomplete="off"><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Save to ' + esc(where(S.kind ? '' : S.prefix)) + '</button></div></form>', () => resolve(val));
     $('#uu').focus();
     $('form', modalEl).onsubmit = (e) => { e.preventDefault(); const u = $('#uu').value.trim(); if (!/^https?:\/\//i.test(u)) { $('#uu').focus(); return; } val = { url: u, name: $('#un').value.trim() }; closeModal(); };
     modalEl.onclick = (e) => { if (e.target.closest('[data-x=no]')) closeModal(); };
@@ -1372,7 +1458,7 @@ function askUrl() {
 async function uploadFromUrl() {
   const v = await askUrl();
   if (!v) return;
-  const j = startJob('Saving link to R2');
+  const j = startJob('Saving link to ' + where(S.kind ? '' : S.prefix));
   if (!j) return;
   const ac = new AbortController();
   j.onCancel = () => ac.abort();
@@ -1452,7 +1538,7 @@ $('#selDl').onclick = () => zipSelected(true);
 $('#selZip').onclick = () => zipSelected(false);
 $('#selMove').onclick = () => moveFiles(selItems(), 'move');
 $('#selCopy').onclick = () => moveFiles(selItems(), 'copy');
-$('#selDel').onclick = async () => { const l = selItems(); if (!l.length) return; if (await confirmDlg('Move ' + l.length + (l.length === 1 ? ' file' : ' files') + ' to trash?', 'You can restore them for ' + BOOT.trashDays + ' days.', 'Move to trash')) trashFiles(l); };
+$('#selDel').onclick = async () => { const l = selItems(); if (!l.length) return; if (driveOf(l[0].key)) { deleteForever(l); return; } if (await confirmDlg('Move ' + l.length + (l.length === 1 ? ' file' : ' files') + ' to trash?', 'You can restore them for ' + BOOT.trashDays + ' days.', 'Move to trash')) trashFiles(l); };
 $('#selRestore').onclick = () => restoreItems(selItems());
 $('#selPurge').onclick = () => purgeItems(selItems());
 
@@ -1521,7 +1607,7 @@ async function newFolder() {
 /* --- right-click (desktop) and press-and-hold (phones) --- */
 async function ctxItem(it, x, y) {
   if (S.sel.size > 1 && S.sel.has(it.key) && !it.trash) {
-    const a = await showMenu(S.sel.size + ' files selected', [['dl', 'download', 'Download as zip'], '-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['del', 'trash', 'Move to trash', true], '-', ['clear', 'x', 'Clear selection']], x, y);
+    const a = await showMenu(S.sel.size + ' files selected', [['dl', 'download', 'Download as zip'], '-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['del', 'trash', driveOf(it.key) ? 'Delete permanently' : 'Move to trash', true], '-', ['clear', 'x', 'Clear selection']], x, y);
     if (a === 'dl') zipSelected(true); else if (a === 'move') moveFiles(selItems(), 'move'); else if (a === 'copy') moveFiles(selItems(), 'copy'); else if (a === 'del') $('#selDel').click(); else if (a === 'clear') $('#selClear').click();
     return;
   }
@@ -1529,7 +1615,7 @@ async function ctxItem(it, x, y) {
   if (a) runFileAction(a, it);
 }
 async function ctxFolder(f, x, y) {
-  const a = await showMenu(f.name, [['open', 'folder', 'Open'], '-', ['del', 'trash', 'Move to trash', true]], x, y);
+  const a = await showMenu(f.name, [['open', 'folder', 'Open'], '-', ['del', 'trash', driveOf(f.key) ? 'Delete permanently' : 'Move to trash', true]], x, y);
   if (a === 'open') go(f.key); else if (a === 'del') del(f);
 }
 async function ctxEmpty(x, y) {
@@ -1537,11 +1623,11 @@ async function ctxEmpty(x, y) {
   const a = await showMenu('Create or upload', newRows().concat(S.files.length ? ['-', ['selmode', 'check', 'Select files']] : []), x, y);
   if (a === 'selmode') setSelMode(true); else if (a) doNew(a);
 }
-const NOCTX = 'input,textarea,select,button,a,label,.nav,.navcard,.usage,.selbar,.note,.thead,.searchbar,.sec-h,.crumbs,.ctx,.sheet,.uploads,.job,.fab,#modal';
+const NOCTX = 'input,textarea,select,button,a,label,.nav,.navcard,.usage,.selbar,.note,.thead,.searchbar,.sec-h,.crumbs,.ctx,.sheet,.uploads,.job,.fab,#modal,#folderSec';
 function ctxAt(t, x, y) {
   if (!t || !t.closest) return false;
   if (S.kind === 'links') { const lr = t.closest('#lkList [data-l]'); if (lr && !t.closest('a,button')) { const l = L.shown[+lr.dataset.l]; if (l) { linkMenu(l, x, y); return true; } } return false; }
-  const row = t.closest('#list [data-i]'), fc = t.closest('#list [data-f], #folders [data-f]');
+  const row = t.closest('#list [data-i]'), fc = t.closest('#list [data-f]');
   if (row) { const it = S.shown[+row.dataset.i]; if (it) { ctxItem(it, x, y); return true; } return false; }
   if (fc) { const f = S.shownFolders[+fc.dataset.f]; if (f) { ctxFolder(f, x, y); return true; } return false; }
   if (t.closest(NOCTX)) return false;
@@ -1568,7 +1654,7 @@ document.addEventListener('click', (e) => { if (Date.now() < suppressClick) { e.
 /* --- new text file --- */
 function newTextFile() {
   const prefix = S.kind ? '' : S.prefix;
-  openModal('<form class="dlg wide" role="dialog" aria-modal="true"><h2>New text file</h2><p>It will be saved in ' + esc(prefix ? '/' + prefix : 'the top level') + '.</p><input id="ntName" class="field" value="untitled.txt" maxlength="120" autocomplete="off"><textarea id="ntText" class="field area" spellcheck="false" placeholder="Start typing…"></textarea><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Create</button></div></form>');
+  openModal('<form class="dlg wide" role="dialog" aria-modal="true"><h2>New text file</h2><p>It will be saved in ' + esc(placeOf(prefix)) + '.</p><input id="ntName" class="field" value="untitled.txt" maxlength="120" autocomplete="off"><textarea id="ntText" class="field area" spellcheck="false" placeholder="Start typing…"></textarea><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Create</button></div></form>');
   const nm = $('#ntName'), dot = nm.value.indexOf('.');
   nm.focus(); nm.setSelectionRange(0, dot > 0 ? dot : nm.value.length);
   $('form', modalEl).onsubmit = async (e) => {
@@ -1586,7 +1672,7 @@ function newTextFile() {
 function newZipFile() {
   if (!HAS_STREAMS) { toast('Your browser is too old for zipping (needs Chrome 103, Safari 16.4 or Firefox 113 or newer).', 'err'); return; }
   const prefix = S.kind ? '' : S.prefix, picked = [];
-  openModal('<form class="dlg wide" role="dialog" aria-modal="true"><h2>New zip file</h2><p>Add files and they are zipped and saved in ' + esc(prefix ? '/' + prefix : 'the top level') + '.</p><input id="nzName" class="field" value="archive.zip" maxlength="120" autocomplete="off"><div class="zdrop" id="zDrop"><b>Drop files or folders here</b><span><button type="button" class="link" data-z="files">Choose files</button> or <button type="button" class="link" data-z="dir">choose a folder</button></span></div><div class="zlist" id="zList"></div><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Create zip</button></div></form>');
+  openModal('<form class="dlg wide" role="dialog" aria-modal="true"><h2>New zip file</h2><p>Add files and they are zipped and saved in ' + esc(placeOf(prefix)) + '.</p><input id="nzName" class="field" value="archive.zip" maxlength="120" autocomplete="off"><div class="zdrop" id="zDrop"><b>Drop files or folders here</b><span><button type="button" class="link" data-z="files">Choose files</button> or <button type="button" class="link" data-z="dir">choose a folder</button></span></div><div class="zlist" id="zList"></div><div class="dlg-acts"><button type="button" class="btn" data-x="no">Cancel</button><button type="submit" class="btn primary">Create zip</button></div></form>');
   const draw = () => {
     const el = $('#zList'); if (!el) return;
     el.innerHTML = picked.map((p, i) => '<div class="zr"><span class="zn" title="' + esc(p.path) + '">' + esc(p.path) + '</span><small>' + fmt(p.file.size) + '</small><button type="button" class="ib" data-zr="' + i + '" aria-label="Remove">' + ico('x', 16) + '</button></div>').join('') + (picked.length ? '<small class="hint">' + picked.length + (picked.length === 1 ? ' file, ' : ' files, ') + fmt(picked.reduce((n, p) => n + p.file.size, 0)) + '</small>' : '');

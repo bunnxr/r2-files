@@ -2,6 +2,8 @@
 #  r2 by bunnxr: terminal upload client (Windows PowerShell)
 #
 #  Run it with:   irm https://u.bunnxr.com | iex
+#  To upload to Zenith (your own server) instead of R2:
+#                 irm https://u.bunnxr.com/local | iex
 #
 #  Nothing is installed and nothing is written to this computer: no copy
 #  of this script, no config file, no temporary files. Each chunk is read
@@ -23,6 +25,7 @@
 # ---------------------------------------------------------------------
 $Script:Api      = 'https://files.bunnxr.com'  # the Worker; /cli/* is password-protected
 $Script:Dest     = ''                          # folder inside the bucket, '' = top level
+$Script:Target   = 'R2'                        # shown in messages; u.bunnxr.com/local serves Dest 'zenith:/', Target 'Zenith'
 $Script:Block    = 1048576                     # 1 MiB: read size, and how often progress is redrawn
 $Script:Retries  = 3                           # tries per chunk before a file is given up on
 $Script:BarWidth = 26
@@ -210,7 +213,8 @@ function Draw-End { Write-Host '' }
 #  6. Uploading one file
 # ---------------------------------------------------------------------
 # Sends one part: reads it from the file a megabyte at a time, writes each
-# block into the request stream and returns the ETag R2 gives back.
+# block into the request stream and returns the ETag the storage gives back
+# (for Zenith the URL points at the Worker, which passes the chunk on).
 function Send-Part {
   param([string]$File, [long]$Offset, [long]$Length, [string]$Url, [long]$Base)
   $stream = $null; $body = $null; $response = $null
@@ -243,7 +247,7 @@ function Send-Part {
     $etag = $response.Headers['ETag']
     $response.Close(); $response = $null
     if ([string]::IsNullOrEmpty($etag)) {
-      $Script:PartError = 'R2 did not return an ETag'
+      $Script:PartError = $Script:Target + ' did not return an ETag'
       return $null
     }
     # R2 returns the ETag in quotes; it is passed through exactly as the
@@ -480,6 +484,7 @@ $banner = @'
 '@
 Write-Host $banner -ForegroundColor Cyan
 Say 'root@CHARLie:~# terminal parser'
+Say ('Uploading to ' + $Script:Target)
 Say $Script:Api
 
 try {

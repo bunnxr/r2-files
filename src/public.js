@@ -2,9 +2,11 @@
 //   https://HOST/<name>                          short link (see links.js), optionally expiring
 //   https://HOST/<folder>/<file>                 files inside a PUBLIC_FOLDERS folder
 //   https://HOST/<folder>/<file>?e=<unix>&s=<sig>  older signed links (still honoured)
-// The Worker checks the rules, then streams the file from R2 (range requests work, so video seeks).
+// The Worker checks the rules, then streams the file from where it lives: R2, or Zenith for paths
+// starting with "zenith:/" (range requests work, so video seeks). Nothing is buffered.
 import { validKey, isInternal, viewMime } from "./util.js";
-import { presign, encPath } from "./sigv4.js";
+import { encPath } from "./sigv4.js";
+import { store } from "./storage/index.js";
 import { contentDisposition } from "./uploads.js";
 import { lookupLink, dropExpired } from "./links.js";
 
@@ -35,39 +37,49 @@ export async function shareUrl(c, key, seconds) {
   if (c.PUBLIC_HOST) {
     return { url: "https://" + c.PUBLIC_HOST + "/" + encPath(key) + "?e=" + exp + "&s=" + (await signShare(c, key, exp)), expires: exp };
   }
-  return { url: await presign(c, "GET", key, { expires: seconds }), expires: exp };
+  return { url: await store(c).signedLink(key, seconds), expires: exp };
 }
 
 const plain = (text, status) => new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 
-// Streams one object from R2 to the client. Used for public files and for the same-origin /api/read.
+// Streams one file to the client. Used for public files and links, and for the same-origin /api/read.
 // view: show in the browser (inline, with a content type the browser understands)
 async function streamObject(c, request, key, { dl, view, cache, cors }) {
   const query = {};
-  const vmime = view && !dl ? viewMime(key.split("/").pop()) : "";
+  const name = key.split("/").pop();
+  const vmime = view && !dl ? viewMime(name) : "";
   if (dl) query["response-content-disposition"] = contentDisposition("attachment", key);
   else if (vmime) query["response-content-disposition"] = contentDisposition("inline", key);
-  const upstream = await presign(c, request.method === "HEAD" ? "HEAD" : "GET", key, { query, expires: 300 });
   const h = {};
   for (const n of ["range", "if-none-match", "if-modified-since", "if-match", "if-range"]) { const v = request.headers.get(n); if (v) h[n] = v; }
   let res;
-  try { res = await fetch(upstream, { method: request.method === "HEAD" ? "HEAD" : "GET", headers: h }); } catch (err) { return plain("Storage is unavailable.", 502); }
+  try { res = await store(c).get(key, { method: request.method === "HEAD" ? "HEAD" : "GET", headers: h, query }); } catch (err) { return plain("Storage is unavailable.", 502); }
   if (res.status === 404) return plain("Not found", 404);
   if (res.status >= 400 && res.status !== 412 && res.status !== 416) return plain("Storage error.", 502);
   const out = new Headers();
   for (const n of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified", "content-disposition"]) { const v = res.headers.get(n); if (v) out.set(n, v); }
   if (vmime) out.set("content-type", vmime);
+  // Files dropped onto Zenith over SMB may have no stored type: guess it from the name
+  else if (!out.get("content-type")) out.set("content-type", viewMime(name) || "application/octet-stream");
+  // and the storage may ignore response-content-disposition, so set it here as well
+  if (query["response-content-disposition"] && !out.get("content-disposition")) out.set("content-disposition", query["response-content-disposition"]);
   out.set("cache-control", cache);
   out.set("x-content-type-options", "nosniff");
   out.set("referrer-policy", "no-referrer");
   if (cors) out.set("access-control-allow-origin", "*");
-  // HTML and SVG shown directly from the public host must not be able to run scripts
-  if (cors && /^(text\/html|image\/svg\+xml|application\/xhtml)/i.test(out.get("content-type") || "")) out.set("content-security-policy", "sandbox; default-src 'none'; img-src * data:; style-src 'unsafe-inline'");
+  // HTML and SVG must not be able to run scripts: not on the public host, and not on the app's own
+  // origin either (/api/read, which is how files on Zenith are shown in the app)
+  if (/^(text\/html|image\/svg\+xml|application\/xhtml)/i.test(out.get("content-type") || "")) out.set("content-security-policy", "sandbox; default-src 'none'; img-src * data:; style-src 'unsafe-inline'");
   return new Response(request.method === "HEAD" ? null : res.body, { status: res.status, headers: out });
 }
 
-// Same-origin read for the app itself (zip browsing, text viewer, zipping). No CORS on the bucket is needed for this.
-export const proxyRead = (c, request, key) => streamObject(c, request, key, { dl: false, cache: "no-store", cors: false });
+// Same-origin read for the app itself (zip browsing, text viewer, zipping, and showing or downloading
+// files on Zenith). No CORS on the bucket is needed for this.
+//   ?dl=1      download (attachment)          ?inline=1   show in the browser
+export const proxyRead = (c, request, key, url) => {
+  const dl = !!url && url.searchParams.get("dl") === "1", view = !!url && url.searchParams.get("inline") === "1";
+  return streamObject(c, request, key, { dl, view, cache: "no-store", cors: false });
+};
 
 // ---------------------------------------------------------------------
 //  Viewer page for short links opened in a tab: the site's logo as the tab icon and the file name as the

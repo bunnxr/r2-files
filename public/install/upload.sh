@@ -3,6 +3,8 @@
 #  r2 by bunnxr: terminal upload client (macOS, Linux, Git Bash, WSL)
 #
 #  Run it with:   curl -fsSL https://u.bunnxr.com | bash
+#  To upload to Zenith (your own server) instead of R2:
+#                 curl -fsSL https://u.bunnxr.com/local | bash
 #
 #  Nothing is installed and nothing is written to this computer: no copy
 #  of this script, no config file, no temporary files. Each chunk is read
@@ -28,6 +30,7 @@ set -o pipefail
 # ---------------------------------------------------------------------
 API="https://files.bunnxr.com"   # the Worker; /cli/* is password-protected
 DEST=""                          # folder inside the bucket, "" = top level
+TARGET="R2"                      # shown in messages; u.bunnxr.com/local serves DEST="zenith:/" TARGET="Zenith"
 MB=1048576                       # 1 MiB: the block size used for reading and for progress
 RETRIES=3                        # tries per chunk before a file is given up on
 BAR_WIDTH=26
@@ -242,7 +245,8 @@ draw_end() { printf '\n' > "$TTY"; }
 #  6. Uploading one file
 # ---------------------------------------------------------------------
 # Sends one part: reads it from the file a megabyte at a time, pipes it
-# straight into curl and returns the ETag R2 gives back.
+# straight into curl and returns the ETag the storage gives back (for Zenith
+# the URL points at the Worker, which passes the chunk on).
 #   send_part <file> <first block, in MiB> <bytes in this part> <url> <bytes already done>
 send_part() {
   local f=$1 skipmb=$2 len=$3 url=$4 base=$5
@@ -266,14 +270,14 @@ send_part() {
 
   code=${out##*$'\n'}
   if [ "$code" != "200" ] && [ "$code" != "204" ]; then
-    PART_ERROR="R2 answered with HTTP ${code:-no response}"
+    PART_ERROR="$TARGET answered with HTTP ${code:-no response}"
     return 1
   fi
   # R2 returns the ETag in quotes; it is passed through exactly as the
   # browser uploader passes it, because that is what the complete call wants.
   etag=$(printf '%s' "$out" | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]:[[:space:]]*\(.*\)$/\1/p' | tail -1)
   if [ -z "$etag" ]; then
-    PART_ERROR="R2 did not return an ETag"
+    PART_ERROR="$TARGET did not return an ETag"
     return 1
   fi
   printf '%s' "$etag"
@@ -513,7 +517,7 @@ cat > "$TTY" <<'BANNER'
 
 BANNER
 printf '\033[0m' > "$TTY"
-say "r2 by bunnxr: terminal upload"
+say "r2 by bunnxr: terminal upload to $TARGET"
 say "$API"
 
 if ! ask_password; then

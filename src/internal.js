@@ -9,7 +9,7 @@
 // Only link management and folder browsing (for picking a file) are exposed here.
 // Nothing can be uploaded, moved, deleted or read through these routes.
 import { HttpError, json, readJson, validPrefix, isInternal } from "./util.js";
-import { listAll } from "./r2.js";
+import { store } from "./storage/index.js";
 import { listLinks, updateLink, deleteLink, addLink } from "./links.js";
 
 export const INTERNAL_HOST = "r2-files.internal";
@@ -48,7 +48,7 @@ export async function handleInternal(request, c, url) {
     case "GET /list": { // folder browser for choosing the file of a new link
       const prefix = url.searchParams.get("prefix") ?? "";
       if (!validPrefix(prefix) || isInternal(prefix) || prefix.startsWith(".trash/")) throw new HttpError(400, "Invalid folder path.");
-      const r = await listAll(c, { prefix, delimiter: "/", maxPages: 5 });
+      const r = await store(c).list({ prefix, delimiter: "/", maxPages: 5 });
       return json({
         prefix,
         folders: r.folders.filter((f) => f !== ".trash/" && !isInternal(f)),

@@ -3,17 +3,19 @@
 //
 //  https://u.bunnxr.com/             serves public/install/upload.sh or
 //                                    upload.ps1, picked from the User-Agent.
+//  https://u.bunnxr.com/local        the same scripts, set to upload to
+//                                    Zenith (your own server) instead of R2.
 //  https://files.bunnxr.com/cli/*    the upload routes the script calls.
 //                                    Every one needs the upload password as
-//                                    "Authorization: Bearer <password>".
+//                                    "Authorization: Bearer <password>",
+//                                    except upload/data (see below).
 //
 //  There is deliberately no delete, move, trash, share, list or settings
 //  route here: the password can only add files, never remove or read them.
 // ---------------------------------------------------------------------
-import { HttpError, json, readJson, validKey, logEvent } from "./util.js";
-import { presign } from "./sigv4.js";
-import { r2 } from "./r2.js";
-import { uploadInit, uploadComplete } from "./uploads.js";
+import { json, readJson, logEvent } from "./util.js";
+import { ZENITH_ROOT } from "./storage/index.js";
+import { uploadInit, uploadComplete, partTarget, uploadData, uploadAbort } from "./uploads.js";
 import { listParts } from "./fileops.js";
 import { fetchToR2 } from "./urlfetch.js";
 import { readAuth, safeEqual, validPassword } from "./upauth.js";
@@ -31,11 +33,21 @@ const plain = (text, status, extra) =>
   });
 
 // ---------------------------------------------------------------------
-//  The installer host: one URL, two scripts
+//  The installer host: one URL per destination, two scripts
+//    /        uploads go to R2
+//    /local   uploads go to Zenith: the same script, with its two setting
+//             lines (destination folder and name) switched over
 // ---------------------------------------------------------------------
-async function serveScript(request, env, url) {
+const TO_ZENITH = {
+  sh: [[/^DEST=""/m, 'DEST="' + ZENITH_ROOT + '"'], [/^TARGET="R2"/m, 'TARGET="Zenith"']],
+  ps1: [[/^\$Script:Dest(\s*)= ''/m, "$Script:Dest$1= '" + ZENITH_ROOT + "'"], [/^\$Script:Target(\s*)= 'R2'/m, "$Script:Target$1= 'Zenith'"]],
+};
+
+async function serveScript(request, env, url, c) {
   if (request.method !== "GET" && request.method !== "HEAD") return plain("Method not allowed", 405, { allow: "GET, HEAD" });
-  if (url.pathname !== "/") return plain("Not found", 404);
+  const local = url.pathname === "/local" || url.pathname === "/local/";
+  if (url.pathname !== "/" && !local) return plain("Not found", 404);
+  if (local && !(c && c.ZENITH)) return plain("Zenith is not set up on this Worker yet.", 503);
 
   const ua = request.headers.get("User-Agent") || "";
   // Invoke-RestMethod / irm send "... WindowsPowerShell/5.1" or "... PowerShell/7.x";
@@ -45,9 +57,15 @@ async function serveScript(request, env, url) {
   if (!env.ASSETS) return plain("Static assets binding missing. Check the [assets] section in wrangler.toml.", 500);
   const res = await env.ASSETS.fetch(new Request(new URL(SCRIPTS[which], url.origin), { method: "GET" }));
   if (!res.ok) return plain("The install script is missing from this deployment.", 500);
-  const body = await res.text();
+  let body = await res.text();
+  if (local) {
+    for (const [find, put] of TO_ZENITH[which]) {
+      if (!find.test(body)) return plain("The install script's settings lines were changed, so it cannot be pointed at Zenith.", 500);
+      body = body.replace(find, put);
+    }
+  }
 
-  logEvent("script.served", { script: which, ua });
+  logEvent("script.served", { script: which, ua, target: local ? "zenith" : "r2" });
   return plain(request.method === "HEAD" ? null : body, 200);
 }
 
@@ -82,6 +100,9 @@ async function checkPassword(request, c, url) {
 //  Router. Only the routes listed here exist under /cli/.
 // ---------------------------------------------------------------------
 async function handleCli(request, env, c, ctx, url) {
+  // A chunk for Zenith: the signed URL that upload/part handed out is the permission (like an R2
+  // presigned URL), so the script can PUT the chunk to it exactly as it would to R2.
+  if (request.method === "PUT" && url.pathname === PREFIX + "upload/data") return uploadData(c, request, url);
   if (request.method !== "POST") return json({ error: "Not found." }, 404);
 
   if (!(await checkPassword(request, c, url))) return json({ error: "Wrong or missing upload password." }, 401);
@@ -101,14 +122,8 @@ async function handleCli(request, env, c, ctx, url) {
     case "upload/init":
       return json(await uploadInit(c, await readJson(request)));
 
-    case "upload/part": {
-      const b = await readJson(request);
-      const n = Number(b.partNumber);
-      if (!validKey(b.key, "file") || typeof b.uploadId !== "string" || !b.uploadId || !Number.isInteger(n) || n < 1 || n > 10000) {
-        throw new HttpError(400, "Invalid request.");
-      }
-      return json({ url: await presign(c, "PUT", b.key, { query: { partNumber: String(n), uploadId: b.uploadId } }) });
-    }
+    case "upload/part":
+      return json(await partTarget(c, await readJson(request), url.origin + PREFIX + "upload/data"));
 
     case "upload/complete": {
       const b = await readJson(request);
@@ -124,10 +139,9 @@ async function handleCli(request, env, c, ctx, url) {
 
     case "upload/abort": {
       const b = await readJson(request);
-      if (!validKey(b.key, "file") || typeof b.uploadId !== "string" || !b.uploadId) throw new HttpError(400, "Invalid request.");
-      await r2(c, "DELETE", b.key, { query: { uploadId: b.uploadId } });
+      const r = await uploadAbort(c, b);
       logEvent("upload.error", { key: b.key, via: "cli", error: "aborted by the client" });
-      return json({ ok: true });
+      return json(r);
     }
 
     case "upload/parts":
