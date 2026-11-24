@@ -76,6 +76,11 @@ function getConfig(env) {
   const zv = (k) => (env && typeof env[k] === "string" ? env[k].trim() : "");
   const zenith = { endpoint: zv("ZENITH_ENDPOINT").replace(/\/+$/, ""), bucket: zv("ZENITH_BUCKET"), key: zv("ZENITH_KEY"), secret: zv("ZENITH_SECRET") };
   c.ZENITH = /^https:\/\/[^/\s]+$/.test(zenith.endpoint) && zenith.bucket && zenith.key && zenith.secret ? zenith : null;
+  // Optional Cloudflare Access service token in front of ZENITH_ENDPOINT (secrets ZENITH_CF_ACCESS and
+  // ZENITH_CF_KEY). The Client ID always ends in ".access", so whichever value does is the ID and the
+  // other is the Client Secret. Without both, requests go out without them, as before.
+  const a1 = zv("ZENITH_CF_ACCESS"), a2 = zv("ZENITH_CF_KEY");
+  if (c.ZENITH && a1 && a2) c.ZENITH.access = a2.endsWith(".access") && !a1.endsWith(".access") ? { id: a2, secret: a1 } : { id: a1, secret: a2 };
   return c;
 }
 

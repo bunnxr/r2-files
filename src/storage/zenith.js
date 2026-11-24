@@ -2,7 +2,9 @@
 //
 //   ${ZENITH_ENDPOINT}/${ZENITH_BUCKET}/<key>     path-style, signed with SigV4 (aws4fetch)
 //
-// SigV4 is the only authentication. Browsers never talk to the endpoint: every byte goes through
+// SigV4 authenticates every request to s3proxy. Cloudflare Access may sit in front of the hostname too:
+// then the Worker also sends the service token from ZENITH_CF_ACCESS / ZENITH_CF_KEY.
+// Browsers never talk to the endpoint: every byte goes through
 // this Worker. That needs no CORS on s3proxy, and it is why a chunk may not exceed 95 MiB (the
 // request-body cap on Cloudflare's proxy is 100 MB, both for the Worker and for the tunnel).
 import { AwsClient } from "../vendor/aws4fetch.js";
@@ -34,7 +36,15 @@ export function zenithDriver(c) {
       const qs = query ? Object.keys(query).map((k) => rfc3986(k) + "=" + rfc3986(query[k])).join("&") : "";
       const url = base + (key ? "/" + encPath(key) : "") + (qs ? "?" + qs : "");
       const h = Object.assign({}, headers, { "x-amz-content-sha256": "UNSIGNED-PAYLOAD" }); // bodies are streamed, never hashed
-      const req = await aws.sign(url, { method, headers: h, body });
+      let req = await aws.sign(url, { method, headers: h, body });
+      // Cloudflare Access service token, added after signing: it is checked by Cloudflare, not by s3proxy,
+      // so it stays out of the SigV4 signature
+      if (z.access) {
+        const ah = new Headers(req.headers);
+        ah.set("CF-Access-Client-Id", z.access.id);
+        ah.set("CF-Access-Client-Secret", z.access.secret);
+        req = new Request(req, { headers: ah });
+      }
       // Never cached. Not cf.cacheTtl: any cacheTtl, even 0, switches the request into "cache everything"
       // mode, where Cloudflare sends a HEAD to the origin as a GET (breaking its SigV4 signature, 403)
       // and may fetch a whole file for a Range request. cache: "no-store" bypasses the cache entirely.
