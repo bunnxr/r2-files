@@ -120,7 +120,7 @@ export async function uniqueKey(c, prefix, name) {
     const { d, key } = resolve(c, path);
     const res = await d.head(key);
     if (res.status === 404) return path;
-    if (res.status !== 200) throw new HttpError(502, d.label + " error " + res.status + " while checking the file name.");
+    if (res.status !== 200) throw new HttpError(502, await d.explain(key, res.status, "while checking the file name"));
   }
   throw new HttpError(409, "Too many files with the same name. Rename the file and try again.");
 }

@@ -104,12 +104,23 @@ export function makeDriver(o) {
 
     // ---- single objects
     head: (key) => d.call("HEAD", key),
+    // A HEAD that fails carries no body, so S3's reason (AccessDenied, SignatureDoesNotMatch …) is lost.
+    // Only after such a failure: ask again with a 1-byte GET to read the reason for the error message.
+    async explain(key, status, doing) {
+      let why = "";
+      try {
+        const r = await d.call("GET", key, { headers: { range: "bytes=0-0" } });
+        const code = xmlTag(r.text, "Code"), msg = xmlTag(r.text, "Message");
+        if (code) why = " (" + code + (msg ? ": " + msg : "") + ")";
+      } catch (e) { /* keep the short message */ }
+      return o.label + " error " + status + " " + doing + why + ".";
+    },
     // null when there is no such object. Files dropped onto Zenith over SMB may have no stored
     // content type, so `type` can be "".
     async stat(key) {
       const h = await d.head(key);
       if (h.status === 404) return null;
-      if (!h.ok) throw new HttpError(502, o.label + " error " + h.status + " while reading " + baseOf(key));
+      if (!h.ok) throw new HttpError(502, await d.explain(key, h.status, "while reading " + baseOf(key)));
       return { size: Number(h.headers.get("content-length") || 0), type: h.headers.get("content-type") || "", modified: h.headers.get("last-modified") || "", etag: h.headers.get("etag") || "" };
     },
     // Streams the object; the caller's conditional / Range headers are passed on as they are
@@ -126,7 +137,7 @@ export function makeDriver(o) {
     async copy(from, to) {
       const head = await d.head(from);
       if (head.status === 404) throw new HttpError(404, "File not found: " + baseOf(from));
-      if (!head.ok) throw new HttpError(502, o.label + " error " + head.status + " while reading " + baseOf(from));
+      if (!head.ok) throw new HttpError(502, await d.explain(from, head.status, "while reading " + baseOf(from)));
       const size = Number(head.headers.get("content-length") || 0);
       const src = "/" + o.bucket + "/" + encPath(from); // x-amz-copy-source must be URL-encoded
       if (size <= COPY_SINGLE_MAX) {
