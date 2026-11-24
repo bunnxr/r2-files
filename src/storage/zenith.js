@@ -35,7 +35,10 @@ export function zenithDriver(c) {
       const url = base + (key ? "/" + encPath(key) : "") + (qs ? "?" + qs : "");
       const h = Object.assign({}, headers, { "x-amz-content-sha256": "UNSIGNED-PAYLOAD" }); // bodies are streamed, never hashed
       const req = await aws.sign(url, { method, headers: h, body });
-      return fetch(req, { cf: { cacheTtl: 0 } }); // never cache these subrequests
+      // Never cached. Not cf.cacheTtl: any cacheTtl, even 0, switches the request into "cache everything"
+      // mode, where Cloudflare sends a HEAD to the origin as a GET (breaking its SigV4 signature, 403)
+      // and may fetch a whole file for a Range request. cache: "no-store" bypasses the cache entirely.
+      return fetch(req, { cache: "no-store" });
     },
   });
   return d;
