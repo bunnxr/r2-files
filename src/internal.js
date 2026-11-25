@@ -9,7 +9,7 @@
 // Only link management and folder browsing (for picking a file) are exposed here.
 // Nothing can be uploaded, moved, deleted or read through these routes.
 import { HttpError, json, readJson, validPrefix, isInternal } from "./util.js";
-import { store } from "./storage/index.js";
+import { store, extraDrives } from "./storage/index.js";
 import { listLinks, updateLink, deleteLink, addLink } from "./links.js";
 
 export const INTERNAL_HOST = "r2-files.internal";
@@ -36,7 +36,8 @@ export async function handleInternal(request, c, url) {
 
   switch (request.method + " " + url.pathname) {
     case "GET /config":
-      return json({ linkHost: c.LINK_HOST || c.PUBLIC_HOST });
+      // drives: the other drives (Zenith) whose files can be linked too; browse them with /list?prefix=<root>
+      return json({ linkHost: c.LINK_HOST || c.PUBLIC_HOST, drives: extraDrives(c) });
     case "GET /links":
       return json(await listLinks(c, url.searchParams.get("after") || ""));
     case "POST /link-add":
@@ -45,7 +46,7 @@ export async function handleInternal(request, c, url) {
       return json(await updateLink(c, await readJson(request)));
     case "POST /link-delete":
       return json(await deleteLink(c, (await readJson(request)).name));
-    case "GET /list": { // folder browser for choosing the file of a new link
+    case "GET /list": { // folder browser for choosing the file of a new link (R2, or Zenith with prefix "zenith:/…")
       const prefix = url.searchParams.get("prefix") ?? "";
       if (!validPrefix(prefix) || isInternal(prefix) || prefix.startsWith(".trash/")) throw new HttpError(400, "Invalid folder path.");
       const r = await store(c).list({ prefix, delimiter: "/", maxPages: 5 });
