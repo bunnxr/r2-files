@@ -3,7 +3,7 @@ import { HAS_STREAMS, isZip, readZip, entryBlob, buildZip, mimeOf } from '/zip.j
 let BOOT = { title: 'r2 by bunnxr', accent: '', parallel: 4, retries: 3, view: 'grid', publicHost: '', publicFolders: [], trashDays: 30 };
 try { const r = await fetch('/api/config'); if (r.ok) BOOT = await r.json(); } catch (e) { /* keep defaults */ }
 document.title = BOOT.title;
-{ const h1 = document.querySelector('.brand h1'); if (h1) { h1.textContent = '@bunnxr'; const cur = document.createElement('b'); cur.textContent = '_'; h1.append(cur); } } // header: @bunnxr + blinking cursor, like the shortener's bunnxr_ (tab title and breadcrumb still use SITE_TITLE)
+{ const h1 = document.querySelector('.brand h1'); if (h1) h1.textContent = 'bunnxr'; } // header: bunnxr, like the shortener (tab title and breadcrumb still use SITE_TITLE)
 if (BOOT.accent) document.documentElement.style.setProperty('--accent', BOOT.accent);
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
