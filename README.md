@@ -148,3 +148,15 @@ Only the files in `public/` need to change; leave `src/` alone.
 
 ## Short links on bunnxr.com
 Short links are shown and copied as `https://LINK_HOST/<name>` (for example `bunnxr.com/gta6.mp4`). `bunnxr.com/*` is routed to the separate **shortener** Worker. When the shortener has no link with that name, it hands the request to this Worker through a service binding (`FILES` → `r2-files` in the shortener's `wrangler.toml`), and this Worker serves the file link. On `LINK_HOST` only short links are served, never public folders. The same links also keep working on `PUBLIC_HOST` (`r2.bunnxr.com/gta6.mp4`). To keep the two from clashing, this Worker reads the shortener's KV namespace (binding `SHORTENER_KV`, read only): a custom address the shortener already uses is refused with an error, and automatic addresses (`charlie.zip`, `charlie-2.zip` …) skip such names. If the shortener later adds a back-half that a file link already has, the shortener's link wins on `bunnxr.com`.
+
+## Speed of shared links
+Shared links (`r2.bunnxr.com/…`, `bunnxr.com/…`, public folders and signed links) are served by this Worker, which checks the link's rules and then streams the file. Two things keep that fast:
+
+- **The R2 binding.** `wrangler.toml` binds the bucket as `R2` (`[[r2_buckets]]`, `bucket_name` must match `BUCKET` in `src/config.js`). Reading a file and reading the app's small records (`.links/`, `.notes/`, `.system/`) go through the binding, inside Cloudflare's network, instead of a signed request to the public S3 endpoint. Listing, copies and uploads still use the S3 API. Without the binding everything falls back to the S3 API, as before. A request with `If-Range`, or anything the binding cannot answer, also goes to the S3 API.
+- **The edge cache.** A shared file up to `EDGE_CACHE_MAX_BYTES` (in `src/config.js`, default 512 MiB, the largest object the cache holds on the Free and Pro plans; `0` turns it off) is kept in Cloudflare's cache after its first view. Later plays, seeks (range requests) and downloads come from the cache instead of the bucket. The cache key carries the file's ETag, so a changed file is never served stale. The first view streams from the bucket as before while a second read fills the cache in the background. Link rules (expiry, view-only checks, public folders, signed links) still run on every request before the cache. The app's own previews and downloads (`/api/read`) never use it.
+
+The cache is **per data centre**: the first viewer in each city fills it there. Every shared-file response says where it came from in an `x-edge-cache` header, `HIT` (cache) or `MISS` (bucket). To check, run this twice; the second run should say `HIT`:
+
+    curl -sI https://r2.bunnxr.com/<link> | grep -i x-edge-cache
+
+A HEAD request like this one is answered from the cache too (without the file), and on a `MISS` it starts filling the cache, so a moment later the same command shows `HIT`. Files bigger than `EDGE_CACHE_MAX_BYTES`, and links whose file has no ETag, carry no `x-edge-cache` header: they are always streamed from the bucket.

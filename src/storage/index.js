@@ -148,21 +148,33 @@ export async function bucketUsage(c) {
 //  System records: small JSON objects the app keeps for itself, always in R2
 //  (short links, notes, the upload password). Never Zenith.
 // ---------------------------------------------------------------------
+// With the bucket binding (c.R2) records are read, written and removed through it (no signed S3 call
+// for every short-link lookup); listing them (listPage) always uses the S3 API.
 export function sys(c) {
-  const d = drivers(c).r2;
+  const d = drivers(c).r2, b = c.R2;
+  const failed = (e) => new HttpError(502, "R2 error: " + (e && e.message ? e.message : e));
   return {
     // The text of the record, or null when it does not exist
     async read(obj) {
+      if (b) {
+        let o;
+        try { o = await b.get(obj); } catch (e) { throw failed(e); }
+        return o ? await o.text() : null;
+      }
       const res = await d.call("GET", obj);
       if (res.status === 404) return null;
       if (!res.ok) throw new HttpError(502, d.error(res));
       return res.text;
     },
     async write(obj, body, type) {
+      if (b) {
+        try { await b.put(obj, body, { httpMetadata: { contentType: type || "application/json" } }); } catch (e) { throw failed(e); }
+        return;
+      }
       const res = await d.call("PUT", obj, { headers: { "content-type": type || "application/json" }, body });
       if (!res.ok) throw new HttpError(502, d.error(res));
     },
-    remove: (obj) => d.call("DELETE", obj),
+    remove: (obj) => (b ? b.delete(obj) : d.call("DELETE", obj)),
     listPage: (o) => d.listPage(o),
   };
 }

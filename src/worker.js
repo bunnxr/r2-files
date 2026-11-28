@@ -45,8 +45,8 @@ async function handle(request, env, ctx) {
     const res = await env.ASSETS.fetch(new Request(url.origin + "/favicon.ico"));
     if (res.ok) return new Response(res.body, { headers: { "content-type": "image/x-icon", "cache-control": "public, max-age=86400" } });
   }
-  if (isPublicHost) return servePublic(request, c, url);
-  if (isLinkHost) return servePublic(request, c, url, { shortOnly: true }); // bunnxr.com: short links only, no public folders
+  if (isPublicHost) return servePublic(request, c, url, { ctx });
+  if (isLinkHost) return servePublic(request, c, url, { shortOnly: true, ctx }); // bunnxr.com: short links only, no public folders
   // The shortener's "R2 files" folder, through its service binding (see src/internal.js)
   if (host === INTERNAL_HOST) return handleInternal(request, c, url);
 

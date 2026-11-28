@@ -42,9 +42,42 @@ export async function shareUrl(c, key, seconds) {
 
 const plain = (text, status) => new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 
+// ---------------------------------------------------------------------
+//  Edge cache for shared files. Without it every play, seek and download pulls every byte from the
+//  bucket. A file up to EDGE_CACHE_MAX_BYTES is kept in the data centre's cache (caches.default)
+//  under a key that carries its ETag, so a changed file is a different key and never served stale:
+//    <request origin>/__edge/<encoded path>?v=<etag>
+//  The Cache API itself answers Range (206) and If-None-Match / If-Modified-Since (304) from it.
+//  On a miss the file streams from storage as before, and a second, full read of it fills the cache
+//  in the background (ctx.waitUntil). A second read, not tee(): tee() would hold the file in memory
+//  while a slow viewer downloads it. The link rules (expiry, view-only checks, public folders, signed
+//  links) run in servePublic before this, on every request. Any cache error: served as before.
+// ---------------------------------------------------------------------
+const EDGE_TTL = 2592000; // 30 days; a new version of a file has a new ETag, so a new key
+const filling = new Set(); // cache keys being filled by this isolate, so one file is read once
+
+async function fillEdge(c, key, ckey, etag) {
+  try {
+    const r = await store(c).get(key, { method: "GET" });
+    if (r.status !== 200 || !r.body || (r.headers.get("etag") || "") !== etag) {
+      if (r.body) await r.body.cancel().catch(() => {});
+      return;
+    }
+    const h = new Headers();
+    for (const n of ["content-type", "content-length", "etag", "last-modified"]) { const v = r.headers.get(n); if (v) h.set(n, v); }
+    h.set("cache-control", "public, max-age=" + EDGE_TTL);
+    await caches.default.put(ckey, new Response(r.body, { status: 200, headers: h }));
+  } catch (err) {
+    /* the viewer was served already; the cache just stays empty */
+  } finally {
+    filling.delete(ckey);
+  }
+}
+
 // Streams one file to the client. Used for public files and links, and for the same-origin /api/read.
 // view: show in the browser (inline, with a content type the browser understands)
-async function streamObject(c, request, key, { dl, view, cache, cors }) {
+// edge: use the edge cache (shared links only, never /api/read); ctx: the request's context, for waitUntil
+async function streamObject(c, request, key, { dl, view, cache, cors, edge, ctx }) {
   const query = {};
   const name = key.split("/").pop();
   const vmime = view && !dl ? viewMime(name) : "";
@@ -52,8 +85,35 @@ async function streamObject(c, request, key, { dl, view, cache, cors }) {
   else if (vmime) query["response-content-disposition"] = contentDisposition("inline", key);
   const h = {};
   for (const n of ["range", "if-none-match", "if-modified-since", "if-match", "if-range"]) { const v = request.headers.get(n); if (v) h[n] = v; }
-  let res;
-  try { res = await store(c).get(key, { method: request.method === "HEAD" ? "HEAD" : "GET", headers: h, query }); } catch (err) { return plain("Storage is unavailable.", 502); }
+  let res, edgeState = "", toFill = null;
+  // GET and HEAD (a HEAD is answered from the cache without a body, so `curl -I` shows x-edge-cache too)
+  if (edge && ctx && c.EDGE_CACHE_MAX_BYTES > 0 && (request.method === "GET" || request.method === "HEAD") && !h["if-match"] && typeof caches !== "undefined") {
+    let head = null;
+    try { head = await store(c).head(key); } catch (err) { /* served from storage below, as before */ }
+    if (head && head.status === 404) return plain("Not found", 404);
+    try {
+      const etag = head && head.ok ? head.headers.get("etag") || "" : "";
+      const size = head && head.ok ? Number(head.headers.get("content-length")) : 0;
+      if (etag && size > 0 && size <= c.EDGE_CACHE_MAX_BYTES) {
+        const ckey = new URL(request.url).origin + "/__edge/" + encodeURIComponent(key) + "?v=" + encodeURIComponent(etag);
+        const mh = new Headers();
+        for (const n of ["range", "if-none-match", "if-modified-since"]) { if (h[n]) mh.set(n, h[n]); }
+        if (h["if-range"] && h["if-range"] !== etag) mh.delete("range"); // the browser's copy is old: send it the whole file
+        const hit = await caches.default.match(new Request(ckey, { headers: mh }));
+        if (hit) {
+          res = hit; edgeState = "HIT";
+          if (request.method === "HEAD" && hit.body) hit.body.cancel().catch(() => {});
+        }
+        else { edgeState = "MISS"; toFill = { ckey, etag }; }
+      }
+    } catch (err) { res = undefined; edgeState = ""; toFill = null; }
+  }
+  if (!res) {
+    try { res = await store(c).get(key, { method: request.method === "HEAD" ? "HEAD" : "GET", headers: h, query }); } catch (err) { return plain("Storage is unavailable.", 502); }
+    if (toFill && res.status < 300 && !filling.has(toFill.ckey)) {
+      try { filling.add(toFill.ckey); ctx.waitUntil(fillEdge(c, key, toFill.ckey, toFill.etag)); } catch (err) { filling.delete(toFill.ckey); }
+    }
+  }
   if (res.status === 404) return plain("Not found", 404);
   if (res.status >= 400 && res.status !== 412 && res.status !== 416) return plain("Storage error.", 502);
   const out = new Headers();
@@ -67,6 +127,7 @@ async function streamObject(c, request, key, { dl, view, cache, cors }) {
   out.set("x-content-type-options", "nosniff");
   out.set("referrer-policy", "no-referrer");
   if (cors) out.set("access-control-allow-origin", "*");
+  if (edgeState) out.set("x-edge-cache", edgeState); // HIT: served from this data centre's cache; MISS: from the bucket
   // HTML and SVG must not be able to run scripts: not on the public host, and not on the app's own
   // origin either (/api/read, which is how files on Zenith are shown in the app)
   if (/^(text\/html|image\/svg\+xml|application\/xhtml)/i.test(out.get("content-type") || "")) out.set("content-security-policy", "sandbox; default-src 'none'; img-src * data:; style-src 'unsafe-inline'");
@@ -134,7 +195,8 @@ function viewerPage(key, cache, guard) {
 }
 
 // shortOnly: on LINK_HOST (bunnxr.com, reached through the shortener) only short links are served
-export async function servePublic(request, c, url, { shortOnly } = {}) {
+// ctx: the request's context; shared files use the edge cache only when it is given
+export async function servePublic(request, c, url, { shortOnly, ctx } = {}) {
   if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
   let path;
   try { path = decodeURIComponent(url.pathname.slice(1)); } catch (e) { return plain("Not found", 404); }
@@ -160,7 +222,7 @@ export async function servePublic(request, c, url, { shortOnly } = {}) {
       } else if ((site !== "same-origin" && site !== "none") || !VIEW_DESTS.has(dest)) { // "none": requests made by the browser itself (built-in PDF viewer)
         return plain("This file can only be viewed in the browser, at its link.", 403);
       }
-      const res = await streamObject(c, request, rec.key, { dl: false, view: true, cors: true, cache: "private, no-store" }); // cors: true also keeps HTML / SVG sandboxed
+      const res = await streamObject(c, request, rec.key, { dl: false, view: true, cors: true, cache: "private, no-store", edge: true, ctx }); // cors: true also keeps HTML / SVG sandboxed
       res.headers.set("vary", "Sec-Fetch-Dest, Sec-Fetch-Site");
       return res;
     }
@@ -173,7 +235,7 @@ export async function servePublic(request, c, url, { shortOnly } = {}) {
       if (page) return page;
     }
     // mode "download" always downloads; "view" opens in the browser (?dl=1 still downloads); no mode = browser decides
-    const res = await streamObject(c, request, rec.key, { dl: dl || rec.mode === "download", view: rec.mode === "view" || raw, cors: true, cache });
+    const res = await streamObject(c, request, rec.key, { dl: dl || rec.mode === "download", view: rec.mode === "view" || raw, cors: true, cache, edge: true, ctx });
     res.headers.set("vary", "Sec-Fetch-Dest"); // same URL serves the viewer page to tabs, so caches must keep them apart
     return res;
   }
@@ -187,5 +249,5 @@ export async function servePublic(request, c, url, { shortOnly } = {}) {
     const v = await verifyShare(c, key, e, s);
     if (v !== "ok") return plain(v === "expired" ? "This link has expired." : "This link is not valid.", 403);
   } else if (!isPublicKey(c, key)) return plain("Not found", 404);
-  return streamObject(c, request, key, { dl, cors: true, cache: signed ? "private, max-age=0, must-revalidate" : "public, max-age=300" });
+  return streamObject(c, request, key, { dl, cors: true, cache: signed ? "private, max-age=0, must-revalidate" : "public, max-age=300", edge: true, ctx });
 }

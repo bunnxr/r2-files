@@ -34,6 +34,14 @@ custom_domain = true
 [triggers]
 crons = ["0 4 * * *", "30 * * * *"]
 
+# The bucket itself, as a binding. Reads of files (shared links, previews) and of the app's small
+# records (.links/, .notes/, .system/) go through it, inside Cloudflare's network, instead of the
+# public S3 endpoint. bucket_name must match BUCKET in src/config.js. Without this binding everything
+# falls back to the S3 API, exactly as before. Listing, copies and uploads always use the S3 API.
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "fast"
+
 # The shortener Worker's links (its LINKS namespace). Only read, never written: a file link
 # may not take an address the shortener already uses on bunnxr.com.
 [[kv_namespaces]]

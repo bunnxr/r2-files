@@ -33,6 +33,9 @@ const CONFIG = {
                                     // names it does not know to this Worker through a service binding. Links also keep working on PUBLIC_HOST.
                                     // Empty = short links use PUBLIC_HOST
   UPLOAD_HOST: "u.bunnxr.com", // hostname that serves the terminal install scripts (no login, no secrets). Empty = off
+  EDGE_CACHE_MAX_BYTES: 512 * 1024 ** 2, // shared files up to this size are kept in Cloudflare's edge cache (per data centre),
+                                    // so repeat views and seeks skip the bucket. 512 MiB is the largest object the cache
+                                    // holds on the Free and Pro plans. 0 = off
   TRASH_DAYS: 30,                   // shown in the UI; use the same number in the R2 lifecycle rule for ".trash/"
 
   // ---- Look and feel
@@ -67,6 +70,10 @@ function getConfig(env) {
   c.PUBLIC_HOST = c.PUBLIC_HOST.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
   c.LINK_HOST = c.LINK_HOST.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase() || c.PUBLIC_HOST;
   c.UPLOAD_HOST = c.UPLOAD_HOST.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  // 0 (or anything that is not a positive number) turns the edge cache off; it is not in NUM_KEYS for that reason
+  c.EDGE_CACHE_MAX_BYTES = Number.isFinite(c.EDGE_CACHE_MAX_BYTES) && c.EDGE_CACHE_MAX_BYTES > 0 ? Math.floor(c.EDGE_CACHE_MAX_BYTES) : 0;
+  // The bucket binding ([[r2_buckets]] R2 in wrangler.toml). null = everything goes through the S3 API
+  c.R2 = env && env.R2 && typeof env.R2.get === "function" && typeof env.R2.head === "function" ? env.R2 : null;
   c.PUBLIC_FOLDER_LIST = c.PUBLIC_FOLDERS.split(",").map((p) => p.trim().replace(/^\/+/, "")).filter((p) => p && !p.startsWith(".trash")).map((p) => p.replace(/\/*$/, "/"));
   // The shortener Worker's KV namespace (read only), so file links never clash with its back-halves
   c.SHORTENER_KV = env && env.SHORTENER_KV && typeof env.SHORTENER_KV.get === "function" ? env.SHORTENER_KV : null;
