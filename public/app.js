@@ -620,6 +620,9 @@ function renderSel() {
   $('#selbar').hidden = !(n || S.selMode);
   $('#selClear').hidden = !n;
   ['selDl', 'selZip', 'selMove', 'selCopy', 'selDel'].forEach((id) => { $('#' + id).hidden = tr || !n; });
+  // R2 only: on Zenith "Delete" is permanent already
+  $('#selDelNow').hidden = tr || !n || !!driveOf(S.kind ? '' : S.prefix);
+  $('#selDel').textContent = driveOf(S.kind ? '' : S.prefix) ? 'Delete' : 'Move to trash';
   ['selRestore', 'selPurge'].forEach((id) => { $('#' + id).hidden = !tr || !n; });
   $('#selZip').textContent = 'Save zip in ' + where(S.kind ? '' : S.prefix);
   if (n) { let sz = 0; S.files.forEach((f) => { if (S.sel.has(f.key)) sz += f.size; }); $('#selCount').textContent = n + (n === 1 ? ' file selected' : ' files selected') + ' (' + fmt(sz) + ')'; }
@@ -908,12 +911,14 @@ async function purgeItems(list) {
   if (!ok) return;
   report('Deleted', await runBatches('Deleting forever', list, 1, async (ch) => { await api('/api/delete', { key: ch[0].key }); return {}; }));
 }
-// Files and folders on Zenith (your own server) are deleted for good: it has no trash.
+// Deletes for good, skipping the trash: always on Zenith (your own server), which has no trash, and on R2
+// when "Delete permanently" is picked instead of "Move to trash".
 async function deleteForever(list) {
   if (!list.length) return;
   const one = list.length === 1 ? list[0] : null, isF = !!one && one.type === 'folder';
   const what = one ? '“' + one.name + '”' + (isF ? ' and everything inside it' : '') : list.length + ' files';
-  const ok = await confirmDlg('Delete permanently?', what + ' will be deleted from ' + where(list[0].key) + ' for good. Files there have no trash, so this cannot be undone.', 'Delete permanently');
+  const why = driveOf(list[0].key) ? 'Files there have no trash, so this cannot be undone.' : 'It skips the trash, so it cannot be restored.';
+  const ok = await confirmDlg('Delete permanently?', what + ' will be deleted from ' + where(list[0].key) + ' for good. ' + why, 'Delete permanently');
   if (!ok) return;
   if (!isF) { report('Deleted', await runBatches('Deleting', list, 1, async (ch) => { await api('/api/delete', { key: ch[0].key }); return {}; })); return; }
   const j = startJob('Deleting “' + one.name + '”');
@@ -1341,6 +1346,7 @@ function fileRows(it) {
   rows.push(['edge', 'cloud', 'Edge cache…']);
   if (isEditable(it.name, it.size)) rows.push(['edit', 'edit', 'Edit text']);
   rows.push(['note', 'note', S.notes[it.key] ? 'Edit note…' : 'Add note…'], ['select', 'check', 'Select'], '-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['delete', 'trash', driveOf(it.key) ? 'Delete permanently' : 'Move to trash', true]);
+  if (!driveOf(it.key)) rows.push(['purgeNow', 'trash', 'Delete permanently', true]); // R2: skip the trash
   return rows;
 }
 function runFileAction(a, it) {
@@ -1356,6 +1362,7 @@ function runFileAction(a, it) {
   else if (a === 'delete') del(it);
   else if (a === 'restore') restoreItems([it]);
   else if (a === 'purge') purgeItems([it]);
+  else if (a === 'purgeNow') deleteForever([it]);
   else if (a === 'note') openNote(it);
   else if (a === 'select') { setSelMode(true); toggleSel(it.key, true); render(); }
 }
@@ -1575,6 +1582,7 @@ $('#selDl').onclick = () => zipSelected(true);
 $('#selZip').onclick = () => zipSelected(false);
 $('#selMove').onclick = () => moveFiles(selItems(), 'move');
 $('#selCopy').onclick = () => moveFiles(selItems(), 'copy');
+$('#selDelNow').onclick = () => { const l = selItems(); if (l.length) deleteForever(l); };
 $('#selDel').onclick = async () => { const l = selItems(); if (!l.length) return; if (driveOf(l[0].key)) { deleteForever(l); return; } if (await confirmDlg('Move ' + l.length + (l.length === 1 ? ' file' : ' files') + ' to trash?', 'You can restore them for ' + BOOT.trashDays + ' days.', 'Move to trash')) trashFiles(l); };
 $('#selRestore').onclick = () => restoreItems(selItems());
 $('#selPurge').onclick = () => purgeItems(selItems());
@@ -1644,16 +1652,20 @@ async function newFolder() {
 /* --- right-click (desktop) and press-and-hold (phones) --- */
 async function ctxItem(it, x, y) {
   if (S.sel.size > 1 && S.sel.has(it.key) && !it.trash) {
-    const a = await showMenu(S.sel.size + ' files selected', [['dl', 'download', 'Download as zip'], '-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['del', 'trash', driveOf(it.key) ? 'Delete permanently' : 'Move to trash', true], '-', ['clear', 'x', 'Clear selection']], x, y);
-    if (a === 'dl') zipSelected(true); else if (a === 'move') moveFiles(selItems(), 'move'); else if (a === 'copy') moveFiles(selItems(), 'copy'); else if (a === 'del') $('#selDel').click(); else if (a === 'clear') $('#selClear').click();
+    const rows = [['dl', 'download', 'Download as zip'], '-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['del', 'trash', driveOf(it.key) ? 'Delete permanently' : 'Move to trash', true]];
+    if (!driveOf(it.key)) rows.push(['delNow', 'trash', 'Delete permanently', true]); // R2: skip the trash
+    const a = await showMenu(S.sel.size + ' files selected', rows.concat(['-', ['clear', 'x', 'Clear selection']]), x, y);
+    if (a === 'dl') zipSelected(true); else if (a === 'move') moveFiles(selItems(), 'move'); else if (a === 'copy') moveFiles(selItems(), 'copy'); else if (a === 'del') $('#selDel').click(); else if (a === 'delNow') $('#selDelNow').click(); else if (a === 'clear') $('#selClear').click();
     return;
   }
   const a = await showMenu(it.name, fileRows(it), x, y);
   if (a) runFileAction(a, it);
 }
 async function ctxFolder(f, x, y) {
-  const a = await showMenu(f.name, [['open', 'folder', 'Open'], '-', ['del', 'trash', driveOf(f.key) ? 'Delete permanently' : 'Move to trash', true]], x, y);
-  if (a === 'open') go(f.key); else if (a === 'del') del(f);
+  const rows = [['open', 'folder', 'Open'], '-', ['del', 'trash', driveOf(f.key) ? 'Delete permanently' : 'Move to trash', true]];
+  if (!driveOf(f.key)) rows.push(['purgeNow', 'trash', 'Delete permanently', true]); // R2: skip the trash
+  const a = await showMenu(f.name, rows, x, y);
+  if (a === 'open') go(f.key); else if (a === 'del') del(f); else if (a === 'purgeNow') deleteForever([f]);
 }
 async function ctxEmpty(x, y) {
   if (S.kind === 'trash') { const a = await showMenu('Trash', [['empty', 'trash', 'Empty trash', true]], x, y); if (a) emptyTrash(); return; }
