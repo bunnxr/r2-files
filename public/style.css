@@ -557,7 +557,7 @@ b,strong{font-weight:600}
    Chosen in Settings, applied by public/theme.js before the page paints. The light-theme tints used
    directly above (#dcefea, #e2ebe8 …) are overridden one by one. --accent is !important because
    app.js may set the configured accent inline. ---- */
-[data-theme=dark]{--accent:#4fd1bf!important;--bg:#000;--card:#000;--text:#f2f2f2;--muted:#a3a3a3;--border:#262626;--hover:#0e1f1c;--zebra:transparent;--shadow:none;--danger:#e5484d;--overlay:rgba(0,0,0,.72);--fill:#121212;--line:#262626;--sel:#0f2e29;--tint:#12302b;color-scheme:dark}
+[data-theme=dark]{--accent:#4fd1bf!important;--bg:#000;--card:#000;--text:#f2f2f2;--muted:#a3a3a3;--border:#262626;--hover:#0e1f1c;--zebra:transparent;--shadow:none;--danger:#e5484d;--overlay:rgba(0,0,0,.72);--fill:#121212;--line:transparent;--sel:#0f2e29;--tint:#12302b;color-scheme:dark}
 [data-theme=dark] body{background:#000}
 [data-theme=dark] .btn:hover,[data-theme=dark] .tools select:hover,[data-theme=dark] .nav a.on,[data-theme=dark] .selbar,[data-theme=dark] .zdrop.on,[data-theme=dark] .lk-acts .btn:hover{background:var(--tint)}
 [data-theme=dark] .btn.primary,[data-theme=dark] #btnSelect.on,[data-theme=dark] .fab,[data-theme=dark] .newbtn:hover{color:#000}
