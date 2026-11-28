@@ -39,6 +39,7 @@ function placeOf(prefix) {
 /* ---------- icons ---------- */
 const P = {
   cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+  gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   folderPlus: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M9 13h6"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
@@ -168,10 +169,10 @@ $('#upClear').innerHTML = ico('broom', 17);
 
 /* ---------- browsing ---------- */
 const UPV = 'upload-password'; // the settings view: #view=upload-password
-const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other', 'trash', 'links', UPV];
-const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash', links: 'Links', [UPV]: 'Uploads' };
+const KINDS = ['recent', 'image', 'video', 'audio', 'doc', 'archive', 'other', 'trash', 'links', UPV, 'cache'];
+const KIND_TITLE = { recent: 'Recent files', image: 'Images', video: 'Videos', audio: 'Audio', doc: 'Documents', archive: 'Archives', other: 'Other files', trash: 'Trash', links: 'Links', [UPV]: 'Uploads', cache: 'Edge cache' };
 const CAT = { image: ['Images', '#3b82f6', 'image'], video: ['Videos', '#ef4444', 'video'], audio: ['Audio', '#8b5cf6', 'audio'], doc: ['Documents', '#22a06b', 'doc'], archive: ['Archives', '#f59e0b', 'archive'], other: ['Other', '#64748b', 'file'], trash: ['Trash', '#94a3b8', 'trash'] };
-const NAV = [['', 'Files', 'folder'], ['links', 'Links', 'link'], [UPV, 'Uploads', 'key'], ['trash', 'Trash', 'trash']];
+const NAV = [['', 'Files', 'folder'], ['links', 'Links', 'link'], [UPV, 'Uploads', 'key'], ['cache', 'Cache', 'cloud'], ['trash', 'Trash', 'trash']];
 S.kind = ''; S.usage = null; S.total = 0; S.shownFolders = [];
 const L = { list: [], shown: [], loading: false, error: '', off: false, seq: 0, activeCount: 0, filter: 'all' }; // Links page
 const U = { loading: false, error: '', password: '', auto: 'off', rotatedAt: 0, draft: null, busy: false, seq: 0 }; // Upload password page
@@ -202,6 +203,7 @@ window.addEventListener('hashchange', applyRoute);
 async function load(silent) {
   if (S.kind === 'links') { ++S.seq; return loadLinks(silent); }
   if (S.kind === UPV) { ++S.seq; return loadUpAuth(silent); }
+  if (S.kind === 'cache') { ++S.seq; return loadCache(silent); }
   const seq = ++S.seq;
   if (!silent) { S.loading = true; S.error = ''; render(); }
   try {
@@ -310,14 +312,15 @@ $('#nav').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key =
 
 function render() {
   renderCrumbs(); renderNav(); applyView();
-  // Settings view: no search, no folders, no sort controls, no file list
-  const up = S.kind === UPV;
+  // Settings and cache views: no search, no folders, no sort controls, no file list
+  const up = S.kind === UPV, ec = S.kind === 'cache';
   $('#upSec').hidden = !up;
-  $('#searchBar').hidden = up;
-  if (up) {
+  $('#cacheSec').hidden = !ec;
+  $('#searchBar').hidden = up || ec;
+  if (up || ec) {
     $('#linksSec').hidden = true; $('#filesSec').hidden = true; $('#folderSec').hidden = true;
     $('#selbar').hidden = true; $('#trashbar').hidden = true;
-    renderUpAuth();
+    if (up) renderUpAuth(); else renderCache();
     return;
   }
   const lk = S.kind === 'links';
@@ -1335,6 +1338,7 @@ function fileRows(it) {
   if (isZip(it.name)) rows.push(['open', 'archive', 'Browse archive contents']);
   rows.push(['download', 'download', 'Download'], '-', ['share', 'link', 'Share link…']);
   if (isPublicKey(it.key)) rows.push(['public', 'globe', 'Copy public link']);
+  rows.push(['edge', 'cloud', 'Edge cache…']);
   if (isEditable(it.name, it.size)) rows.push(['edit', 'edit', 'Edit text']);
   rows.push(['note', 'note', S.notes[it.key] ? 'Edit note…' : 'Add note…'], ['select', 'check', 'Select'], '-', ['move', 'move', 'Move to…'], ['copy', 'copy', 'Copy to…'], ['delete', 'trash', driveOf(it.key) ? 'Delete permanently' : 'Move to trash', true]);
   return rows;
@@ -1345,6 +1349,7 @@ function runFileAction(a, it) {
   else if (a === 'download') download(it);
   else if (a === 'share') openShare(it);
   else if (a === 'public') copyPublic(it);
+  else if (a === 'edge') openEdge(it);
   else if (a === 'edit') { preview(it); if (V) V.autoEdit = true; }
   else if (a === 'move') moveFiles([it], 'move');
   else if (a === 'copy') moveFiles([it], 'copy');
@@ -1918,6 +1923,173 @@ $('#upBody').addEventListener('click', (e) => {
     return;
   }
 });
+
+/* ---------- Edge cache: the log page (#view=cache), "cached near me?" and preload ----------
+   Cloudflare's cache cannot be listed, so the page shows the Worker's own log of what it put there
+   (src/edge.js): when, which data centre, which file. Cloudflare also removes rarely used files by
+   itself, so the totals are the most that can still be cached, not a measurement. */
+const EC = { entries: [], cursor: '', loading: false, error: '', off: '', seq: 0, settings: null, checks: {} };
+const MiB = 1048576;
+const logStamp = (t) => { const d = new Date(t), p = (n) => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); };
+async function loadCache(silent, more) {
+  const seq = ++EC.seq;
+  if (!silent && !more) { EC.loading = true; EC.error = ''; render(); }
+  try {
+    const [log, set] = await Promise.all([api('/api/edge/log' + (more ? '?cursor=' + encodeURIComponent(EC.cursor) : '')), more ? Promise.resolve(EC.settings) : api('/api/edge/settings')]);
+    if (seq !== EC.seq) return;
+    EC.entries = more ? EC.entries.concat(log.entries) : log.entries;
+    EC.cursor = log.cursor || ''; EC.off = log.off || ''; EC.settings = set; SETS.edge = set;
+    EC.loading = false; EC.error = '';
+  } catch (e) {
+    if (seq !== EC.seq) return;
+    EC.loading = false;
+    if (silent || more) toast(e.message, 'err'); else EC.error = e.message;
+  }
+  if (S.kind === 'cache') render();
+}
+function renderCache() {
+  $('#ecRefresh').innerHTML = ico('retry', 17);
+  const box = $('#ecBody'), s = EC.settings;
+  $('#ecCount').textContent = EC.entries.length ? EC.entries.length + (EC.cursor ? '+' : '') + (EC.entries.length === 1 ? ' entry' : ' entries') : '';
+  $('#ecClear').hidden = !EC.entries.length;
+  if (EC.loading && !EC.entries.length) { box.innerHTML = '<div class="empty"><div class="spin" style="margin:0 auto 12px"></div><p>Loading the cache log…</p></div>'; return; }
+  if (EC.error) { box.innerHTML = '<div class="empty">' + tile('file', 28) + '<h3>Could not load the cache log</h3><p>' + esc(EC.error) + '</p></div>'; return; }
+  let h = '<div class="ec-info card">';
+  if (s) {
+    h += '<p><b>' + (s.on ? 'On' : 'Off') + '</b>' + (s.on ? ', for shared files up to ' + fmt(s.max) : '') + (s.colo ? ' &nbsp;·&nbsp; you are on data centre <b title="Cloudflare data centre near you (airport code)">' + esc(s.colo) + '</b>' : '') + '</p>';
+    if (!s.sharing) h += '<p class="bad">Shared links are off (PUBLIC_HOST is empty), so nothing is cached.</p>';
+  }
+  h += '<p>Each shared file is copied into the cache of the Cloudflare data centre where it was opened, so the next views there skip the bucket. Cloudflare removes rarely used files by itself, so these totals are the most that can still be cached. Entries older than 30 days are removed from the log.</p></div>';
+  if (EC.off) { box.innerHTML = h + '<div class="empty">' + tile('file', 28) + '<h3>No log</h3><p>' + esc(EC.off) + '</p></div>'; return; }
+  if (!EC.entries.length) { box.innerHTML = h + '<div class="empty">' + tile('file', 28) + '<h3>Nothing cached yet</h3><p>Files are added the first time someone opens a shared link, or with “Edge cache… → Cache this file now” in a file’s menu.</p></div>'; return; }
+  // per data centre: each file version once (the newest entry), summed
+  const seen = new Set(), per = {};
+  for (const e of EC.entries) {
+    const id = e.colo + '|' + e.key + '|' + e.etag;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const p = per[e.colo || '?'] || (per[e.colo || '?'] = { n: 0, size: 0 });
+    p.n++; p.size += e.size;
+  }
+  h += '<div class="ec-sum">' + Object.keys(per).sort((a, b) => per[b].size - per[a].size).map((k) => '<span class="ec-chip" title="Data centre ' + esc(k) + '"><b>' + esc(k) + '</b>' + per[k].n + (per[k].n === 1 ? ' file' : ' files') + ' · ' + fmt(per[k].size) + '</span>').join('') + '</div>';
+  h += '<div class="ec-log card" role="log">' + EC.entries.map((e, i) => {
+    const ck = EC.checks[e.key];
+    return '<div class="ec-row"><time datetime="' + new Date(e.t).toISOString() + '">' + logStamp(e.t) + '</time><span class="ec-colo">' + esc(e.colo || '?') + '</span><span class="ec-via ' + (e.via === 'preload' ? 'pre' : '') + '">' + (e.via === 'preload' ? 'preload' : 'view') + '</span>' +
+      '<a class="ec-key" data-ec="open" data-i="' + i + '" title="' + esc(e.key) + '">' + esc(e.key) + '</a><span class="ec-size">' + fmt(e.size) + '</span>' +
+      '<span class="ec-res' + (ck ? (ck.ok ? ' ok' : ' no') : '') + '">' + (ck ? esc(ck.text) : '') + '</span>' +
+      '<button class="ib" data-ec="check" data-i="' + i + '" title="Is it cached in the data centre near me?" aria-label="Check the cache near me">' + ico('search', 15) + '</button></div>';
+  }).join('') + '</div>';
+  if (EC.cursor) h += '<div class="ec-more"><button class="btn" data-ec="more">Load older entries</button></div>';
+  box.innerHTML = h;
+}
+$('#ecRefresh').onclick = () => { EC.checks = {}; loadCache(); };
+$('#ecClear').onclick = async () => {
+  if (!(await confirmDlg('Clear the cache log?', 'This deletes the log only. Files already in the cache stay there until Cloudflare removes them.', 'Clear log'))) return;
+  try { const r = await api('/api/edge/log/clear', {}); toast('Log cleared (' + r.deleted + (r.deleted === 1 ? ' entry' : ' entries') + ')' + (r.more ? '. Some remain: clear again.' : ''), 'ok'); loadCache(); }
+  catch (e) { toast(e.message, 'err'); }
+};
+$('#ecBody').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-ec]');
+  if (!b) return;
+  const en = EC.entries[+b.dataset.i];
+  if (b.dataset.ec === 'more') { b.disabled = true; loadCache(true, true); return; }
+  if (!en) return;
+  if (b.dataset.ec === 'open') { openEdge({ key: en.key, name: en.key.split('/').pop() }); return; }
+  if (b.dataset.ec === 'check') {
+    EC.checks[en.key] = { text: 'checking…', ok: false }; renderCache();
+    try {
+      const d = await api('/api/edge/status?key=' + encodeURIComponent(en.key));
+      EC.checks[en.key] = !d.cacheable ? { text: d.reason, ok: false } : { text: (d.cached ? 'cached in ' : 'not cached in ') + (d.colo || 'your data centre'), ok: d.cached };
+    } catch (err) { EC.checks[en.key] = { text: err.message, ok: false }; }
+    if (S.kind === 'cache') renderCache();
+  }
+});
+
+// A file's menu → "Edge cache…": is it cached in the data centre near me, and preload it there
+async function openEdge(it) {
+  openModal('<div class="dlg" role="dialog" aria-modal="true"><h2>Edge cache</h2><p>' + esc(it.key) + '</p><div class="ec-st" id="ecSt">Checking the data centre near you…</div><div class="dlg-acts"><button class="btn" data-x="close">Close</button><button class="btn primary" data-x="warm" hidden>Cache this file now</button></div></div>');
+  const st = $('#ecSt'), wb = $('[data-x=warm]', modalEl);
+  let colo = '';
+  const show = (d) => {
+    colo = d.colo || '';
+    const where = colo ? 'data centre ' + colo : 'the data centre near you';
+    if (!d.cacheable) { st.className = 'ec-st'; st.textContent = 'Not cached. ' + d.reason; wb.hidden = true; return; }
+    if (d.cached) { st.className = 'ec-st ok'; st.textContent = 'Cached in ' + where + ' (' + fmt(d.size) + '). Shared links opened around here load from the cache.'; wb.hidden = true; return; }
+    st.className = 'ec-st'; st.textContent = 'Not cached in ' + where + ' yet (' + fmt(d.size) + '). It is added the first time a shared link to it is opened here, or now:'; wb.hidden = false;
+  };
+  modalEl.onclick = async (e) => {
+    const b = e.target.closest('[data-x]');
+    if (!b) return;
+    if (b.dataset.x === 'close') { closeModal(); return; }
+    wb.disabled = true; wb.textContent = 'Caching…';
+    st.className = 'ec-st'; st.textContent = 'Copying the file into the cache' + (colo ? ' of ' + colo : '') + '. Big files take a while; you can close this, it keeps going.';
+    try {
+      const d = await api('/api/edge/warm', { key: it.key });
+      if (st.isConnected) show(d);
+      toast(d.already ? 'Already cached' : 'Cached in ' + (d.colo || 'your data centre'), 'ok');
+      if (S.kind === 'cache') loadCache(true);
+    } catch (err) {
+      if (st.isConnected) { st.textContent = err.message; wb.disabled = false; wb.textContent = 'Try again'; }
+      else toast(err.message, 'err');
+    }
+  };
+  try { show(await api('/api/edge/status?key=' + encodeURIComponent(it.key))); }
+  catch (e) { if (st.isConnected) st.textContent = e.message; }
+}
+
+/* ---------- Settings (the gear, top right): theme, and the edge cache ----------
+   Theme: "light" (default) or "dark" (OLED black), kept in this browser (localStorage "fm-theme");
+   public/theme.js applies it before the page paints. Edge cache: saved in the bucket
+   (.system/edge-cache.json), so it applies to every viewer of shared links. */
+const SETS = { edge: null, busy: false };
+$('#setBtn').innerHTML = ico('gear', 20);
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  ls.set('fm-theme', t);
+  const m = document.querySelector('meta[name=theme-color]');
+  if (m) m.content = t === 'dark' ? '#000000' : '#fbf8f3';
+}
+function renderSettings() {
+  const t = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light', e = SETS.edge;
+  const seg = (name, val, label, on) => '<button type="button" data-s="' + name + '" data-v="' + val + '" aria-pressed="' + on + '"' + (SETS.busy && name === 'edge' ? ' disabled' : '') + '>' + label + '</button>';
+  let h = '<p class="setlbl">Theme</p><div class="seg2" role="group" aria-label="Theme">' + seg('theme', 'light', 'Light', t === 'light') + seg('theme', 'dark', 'Dark', t === 'dark') + '</div>';
+  h += '<p class="setlbl">Edge cache for shared links</p>';
+  if (!e) h += '<p class="sethelp">Loading…</p>';
+  else {
+    const sizes = [32, 64, 128, 256, 512].map((mb) => mb * MiB);
+    if (sizes.indexOf(e.max) < 0) sizes.push(e.max);
+    h += '<div class="seg2" role="group" aria-label="Edge cache">' + seg('edge', 'on', 'On', e.on) + seg('edge', 'off', 'Off', !e.on) + '</div>';
+    h += '<label class="setrow"><span>Files up to</span><select id="setMax"' + (e.on && !SETS.busy ? '' : ' disabled') + '>' + sizes.sort((a, b) => a - b).map((n) => '<option value="' + n + '"' + (n === e.max ? ' selected' : '') + '>' + fmt(n) + '</option>').join('') + '</select></label>';
+    h += '<p class="sethelp">Shared files are kept in Cloudflare’s cache near each viewer, so they load fast. Changes reach every data centre within a minute.</p>';
+  }
+  h += '<a class="setlink" href="#view=cache">' + ico('cloud', 16) + 'Open the cache log</a>';
+  $('#setMenu').innerHTML = h;
+}
+async function saveEdge(patch, okMsg) {
+  SETS.busy = true; renderSettings();
+  try { SETS.edge = await api('/api/edge/settings', patch); EC.settings = SETS.edge; toast(okMsg, 'ok'); if (S.kind === 'cache') render(); }
+  catch (e) { toast(e.message, 'err'); }
+  SETS.busy = false;
+  if (!$('#setMenu').hidden) renderSettings();
+}
+function setMenu(open) {
+  $('#setMenu').hidden = !open;
+  $('#setBtn').setAttribute('aria-expanded', String(open));
+  if (!open) return;
+  renderSettings();
+  api('/api/edge/settings').then((d) => { SETS.edge = d; if (!$('#setMenu').hidden && !SETS.busy) renderSettings(); }).catch((e) => toast(e.message, 'err'));
+}
+$('#setBtn').onclick = () => setMenu($('#setMenu').hidden);
+$('#setMenu').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-s]');
+  if (e.target.closest('.setlink')) { setMenu(false); return; }
+  if (!b || b.disabled) return;
+  if (b.dataset.s === 'theme') { setTheme(b.dataset.v); renderSettings(); return; }
+  if (b.dataset.s === 'edge' && SETS.edge && (b.dataset.v === 'on') !== SETS.edge.on) saveEdge({ on: b.dataset.v === 'on' }, b.dataset.v === 'on' ? 'Edge cache on' : 'Edge cache off');
+});
+$('#setMenu').addEventListener('change', (e) => { if (e.target.id === 'setMax') saveEdge({ max: Number(e.target.value) }, 'Files up to ' + fmt(Number(e.target.value)) + ' are cached'); });
+document.addEventListener('mousedown', (e) => { if (!$('#setMenu').hidden && !e.target.closest('.set')) setMenu(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#setMenu').hidden) { setMenu(false); $('#setBtn').focus(); } });
 
 /* ---------- start ---------- */
 applyView();

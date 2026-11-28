@@ -9,6 +9,7 @@ import { encPath } from "./sigv4.js";
 import { store } from "./storage/index.js";
 import { contentDisposition } from "./uploads.js";
 import { lookupLink, dropExpired } from "./links.js";
+import { edgeLimit, edgeKey, scheduleFill } from "./edge.js";
 
 const enc = new TextEncoder();
 const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -43,36 +44,15 @@ export async function shareUrl(c, key, seconds) {
 const plain = (text, status) => new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 
 // ---------------------------------------------------------------------
-//  Edge cache for shared files. Without it every play, seek and download pulls every byte from the
-//  bucket. A file up to EDGE_CACHE_MAX_BYTES is kept in the data centre's cache (caches.default)
-//  under a key that carries its ETag, so a changed file is a different key and never served stale:
-//    <request origin>/__edge/<encoded path>?v=<etag>
-//  The Cache API itself answers Range (206) and If-None-Match / If-Modified-Since (304) from it.
-//  On a miss the file streams from storage as before, and a second, full read of it fills the cache
-//  in the background (ctx.waitUntil). A second read, not tee(): tee() would hold the file in memory
-//  while a slow viewer downloads it. The link rules (expiry, view-only checks, public folders, signed
-//  links) run in servePublic before this, on every request. Any cache error: served as before.
+//  Edge cache for shared files (keys, settings, filling and the cache log: src/edge.js). Without it
+//  every play, seek and download pulls every byte from the bucket. A file up to the size limit
+//  (Settings → Edge cache, else EDGE_CACHE_MAX_BYTES) is kept in the data centre's cache under a key
+//  that carries its ETag, so a changed file is a different key and never served stale. The Cache API
+//  itself answers Range (206) and If-None-Match / If-Modified-Since (304) from it. On a miss the file
+//  streams from storage as before and fills the cache in the background. The link rules (expiry,
+//  view-only checks, public folders, signed links) run in servePublic before this, on every request.
+//  Any cache error: served as before.
 // ---------------------------------------------------------------------
-const EDGE_TTL = 2592000; // 30 days; a new version of a file has a new ETag, so a new key
-const filling = new Set(); // cache keys being filled by this isolate, so one file is read once
-
-async function fillEdge(c, key, ckey, etag) {
-  try {
-    const r = await store(c).get(key, { method: "GET" });
-    if (r.status !== 200 || !r.body || (r.headers.get("etag") || "") !== etag) {
-      if (r.body) await r.body.cancel().catch(() => {});
-      return;
-    }
-    const h = new Headers();
-    for (const n of ["content-type", "content-length", "etag", "last-modified"]) { const v = r.headers.get(n); if (v) h.set(n, v); }
-    h.set("cache-control", "public, max-age=" + EDGE_TTL);
-    await caches.default.put(ckey, new Response(r.body, { status: 200, headers: h }));
-  } catch (err) {
-    /* the viewer was served already; the cache just stays empty */
-  } finally {
-    filling.delete(ckey);
-  }
-}
 
 // Streams one file to the client. Used for public files and links, and for the same-origin /api/read.
 // view: show in the browser (inline, with a content type the browser understands)
@@ -87,15 +67,19 @@ async function streamObject(c, request, key, { dl, view, cache, cors, edge, ctx 
   for (const n of ["range", "if-none-match", "if-modified-since", "if-match", "if-range"]) { const v = request.headers.get(n); if (v) h[n] = v; }
   let res, edgeState = "", toFill = null;
   // GET and HEAD (a HEAD is answered from the cache without a body, so `curl -I` shows x-edge-cache too)
-  if (edge && ctx && c.EDGE_CACHE_MAX_BYTES > 0 && (request.method === "GET" || request.method === "HEAD") && !h["if-match"] && typeof caches !== "undefined") {
+  let limit = 0;
+  if (edge && ctx && (request.method === "GET" || request.method === "HEAD") && !h["if-match"] && typeof caches !== "undefined") {
+    try { limit = await edgeLimit(c); } catch (err) { limit = 0; }
+  }
+  if (limit > 0) {
     let head = null;
     try { head = await store(c).head(key); } catch (err) { /* served from storage below, as before */ }
     if (head && head.status === 404) return plain("Not found", 404);
     try {
       const etag = head && head.ok ? head.headers.get("etag") || "" : "";
       const size = head && head.ok ? Number(head.headers.get("content-length")) : 0;
-      if (etag && size > 0 && size <= c.EDGE_CACHE_MAX_BYTES) {
-        const ckey = new URL(request.url).origin + "/__edge/" + encodeURIComponent(key) + "?v=" + encodeURIComponent(etag);
+      if (etag && size > 0 && size <= limit) {
+        const ckey = edgeKey(c, request, key, etag);
         const mh = new Headers();
         for (const n of ["range", "if-none-match", "if-modified-since"]) { if (h[n]) mh.set(n, h[n]); }
         if (h["if-range"] && h["if-range"] !== etag) mh.delete("range"); // the browser's copy is old: send it the whole file
@@ -110,9 +94,7 @@ async function streamObject(c, request, key, { dl, view, cache, cors, edge, ctx 
   }
   if (!res) {
     try { res = await store(c).get(key, { method: request.method === "HEAD" ? "HEAD" : "GET", headers: h, query }); } catch (err) { return plain("Storage is unavailable.", 502); }
-    if (toFill && res.status < 300 && !filling.has(toFill.ckey)) {
-      try { filling.add(toFill.ckey); ctx.waitUntil(fillEdge(c, key, toFill.ckey, toFill.etag)); } catch (err) { filling.delete(toFill.ckey); }
-    }
+    if (toFill && res.status < 300) scheduleFill(c, ctx, request, key, toFill.ckey, toFill.etag);
   }
   if (res.status === 404) return plain("Not found", 404);
   if (res.status >= 400 && res.status !== 412 && res.status !== 416) return plain("Storage error.", 502);

@@ -13,6 +13,7 @@ import { fetchToR2 } from "./urlfetch.js";
 import { readAuth, saveAuth, rotateIfDue } from "./upauth.js";
 import { INTERNAL_HOST, handleInternal } from "./internal.js";
 import { PREFIX as CLI_PREFIX, serveScript, handleCli } from "./cli.js";
+import { EDGE_MAX, edgeSettings, saveEdgeSettings, readEdgeLog, clearEdgeLog, pruneEdgeLog, edgeStatus, edgeWarm } from "./edge.js";
 
 // ---------------------------------------------------------------------
 //  Request router
@@ -234,10 +235,25 @@ async function handle(request, env, ctx) {
       const a = await saveAuth(c, patch);
       return json({ password: a.password, auto: a.auto, rotatedAt: a.rotatedAt });
     }
+    // Edge cache (src/edge.js): settings, the cache log, and "cached near me?" / preload for one file.
+    // "Near me" is the data centre this request runs in (request.cf.colo).
+    case "GET /api/edge/settings":
+      return json(edgeInfo(c, request, await edgeSettings(c, true)));
+    case "POST /api/edge/settings":
+      return json(edgeInfo(c, request, await saveEdgeSettings(c, await readJson(request))));
+    case "GET /api/edge/log":
+      return json(await readEdgeLog(c, url.searchParams.get("cursor") || ""));
+    case "POST /api/edge/log/clear":
+      return json(await clearEdgeLog(c));
+    case "GET /api/edge/status":
+      return json(await edgeStatus(c, request, url.searchParams.get("key") || ""));
+    case "POST /api/edge/warm":
+      return json(await edgeWarm(c, request, (await readJson(request)).key));
     default:
       return json({ error: "Not found." }, 404);
   }
 }
+const edgeInfo = (c, request, s) => ({ on: s.on, max: s.max, maxLimit: EDGE_MAX, saved: s.saved, binding: !!c.R2, sharing: !!c.PUBLIC_HOST, colo: (request.cf && request.cf.colo) || "" });
 
 export default {
   // Cron (see [triggers] in wrangler.toml). Rotation happens on the first run
@@ -249,6 +265,8 @@ export default {
       if (problems.length) { logEvent("cron.run", { decision: "skipped", reason: "not configured yet" }); return; }
       if (event.cron === "30 * * * *") {
         if (c.PUBLIC_HOST) { const r = await sweepExpired(c); if (r.deleted) logEvent("links.expired.deleted", r); }
+        // cache log entries older than the cache lifetime (30 days) describe nothing still cached
+        try { const p = await pruneEdgeLog(c); if (p.deleted) logEvent("edge.log.pruned", p); } catch (e) { /* next hour */ }
         return;
       }
       await rotateIfDue(c);
