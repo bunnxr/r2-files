@@ -33,7 +33,7 @@ DEST=""                          # folder inside the bucket, "" = top level
 TARGET="R2"                      # shown in messages; u.bunnxr.com/local serves DEST="zenith:/" TARGET="Zenith"
 MB=1048576                       # 1 MiB: the block size used for reading and for progress
 RETRIES=3                        # tries per chunk before a file is given up on
-BAR_WIDTH=26
+BAR_WIDTH=30                     # widest the progress bar gets; it shrinks to fit narrow windows
 
 # ---------------------------------------------------------------------
 #  2. Small helpers
@@ -200,7 +200,41 @@ ask_password() {
 #  One line, redrawn in place. The byte counter is fed by the block loop
 #  that pipes the file into curl, so it tracks real upload progress (it can
 #  run ahead by at most one pipe buffer, around 64 KB).
+#
+#    ██████████████████▍              14.6 MB / 34.8 MB  3.1 MB/s  ETA 6s
+#
+#  A solid bar (in cyan, on a dark grey track) that fills in eighths of a
+#  block, then the sizes, then speed, ETA and the file name, dimmed. The line
+#  is fitted to the window width so it never wraps. A terminal without UTF-8
+#  gets a plain # / - bar; without colours (or with NO_COLOR set), no colours.
 # ---------------------------------------------------------------------
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+  *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) BAR_UTF=1 ;;
+  *) BAR_UTF=0 ;;
+esac
+if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then BAR_ANSI=1; else BAR_ANSI=0; fi
+if [ "$BAR_UTF" = 1 ]; then
+  B_FULL=$'\xe2\x96\x88'                                   # █
+  B_PART=("" $'\xe2\x96\x8f' $'\xe2\x96\x8e' $'\xe2\x96\x8d' $'\xe2\x96\x8c' $'\xe2\x96\x8b' $'\xe2\x96\x8a' $'\xe2\x96\x89') # ▏▎▍▌▋▊▉ (1/8 … 7/8)
+  if [ "$BAR_ANSI" = 1 ]; then B_TRACK=$B_FULL; else B_TRACK=$'\xe2\x96\x91'; fi # grey █, or ░ without colours
+else
+  B_FULL="#"; B_PART=("" "" "" "" "" "" "" ""); B_TRACK="-"
+fi
+if [ "$BAR_ANSI" = 1 ]; then
+  C_BAR=$'\033[36m'; C_TRACK=$'\033[90m'; C_DIM=$'\033[2m'; C_OFF=$'\033[0m'
+else
+  C_BAR=""; C_TRACK=""; C_DIM=""; C_OFF=""
+fi
+term_cols() { # the window width, read again when the window is resized
+  local c
+  c=$(stty size 2>/dev/null < "$TTY" | awk '{print $2}')
+  case "$c" in ''|*[!0-9]*) c=80 ;; esac
+  [ "$c" -gt 0 ] || c=80
+  COLS=$c
+}
+term_cols
+trap 'term_cols' WINCH
+
 J_TOTAL=0    # bytes in the whole job
 J_DONE=0     # bytes finished before the current file
 J_START=0    # job start, epoch seconds
@@ -209,15 +243,8 @@ J_INDEX=1    # which one is being sent
 J_NAME=""    # its name
 
 draw() { # draw <bytes done in the current file>
-  local done=$(( J_DONE + $1 )) pct=0 fill i line elapsed rate left bar=""
-  [ "$J_TOTAL" -gt 0 ] && pct=$(( done * 100 / J_TOTAL ))
-  [ "$pct" -gt 100 ] && pct=100
-  fill=$(( pct * BAR_WIDTH / 100 ))
-  i=0
-  while [ "$i" -lt "$BAR_WIDTH" ]; do
-    if [ "$i" -lt "$fill" ]; then bar="$bar#"; else bar="$bar."; fi
-    i=$(( i + 1 ))
-  done
+  local done=$(( J_DONE + $1 )) elapsed rate left sizes extra file width room eighths full part rest i bar="" track="" pad
+  [ "$J_TOTAL" -gt 0 ] && [ "$done" -gt "$J_TOTAL" ] && done=$J_TOTAL
 
   elapsed=$(( $(date +%s) - J_START ))
   [ "$elapsed" -lt 1 ] && elapsed=1
@@ -228,15 +255,41 @@ draw() { # draw <bytes done in the current file>
     left="--"
   fi
 
-  line=$(printf '[%s] %3d%%  %s / %s  %s/s  %s elapsed  ETA %s' \
-    "$bar" "$pct" "$(human "$done")" "$(human "$J_TOTAL")" "$(human "$rate")" \
-    "$(clock "$elapsed")" "$left")
-  if [ "$J_FILES" -gt 1 ]; then
-    line="$line  ($J_INDEX/$J_FILES $J_NAME)"
+  # The text after the bar. What does not fit the window goes: the file name first, then speed / ETA.
+  sizes="  $(human "$done") / $(human "$J_TOTAL")"
+  extra="  $(human "$rate")/s  ETA $left"
+  file=""
+  [ "$J_FILES" -gt 1 ] && file="  ($J_INDEX/$J_FILES $J_NAME)"
+  width=$BAR_WIDTH
+  [ $(( COLS - 3 - ${#sizes} )) -lt "$width" ] && width=$(( COLS - 3 - ${#sizes} ))
+  [ "$width" -lt 10 ] && width=10
+  room=$(( COLS - 3 - width - ${#sizes} ))
+  [ "${#extra}" -gt "$room" ] && extra=""
+  room=$(( room - ${#extra} ))
+  if [ "${#file}" -gt "$room" ]; then
+    if [ "$room" -gt 12 ]; then file="${file:0:$(( room - 4 ))}...)"; else file=""; fi
   fi
-  # \r returns to the start of the line; the padding wipes whatever the
-  # previous, possibly longer, line left behind.
-  printf '\r%-118s' "$line" > "$TTY"
+
+  # The bar, in eighths of a block
+  if [ "$J_TOTAL" -gt 0 ]; then eighths=$(( done * width * 8 / J_TOTAL )); else eighths=$(( width * 8 )); fi
+  full=$(( eighths / 8 )); part=$(( eighths % 8 ))
+  [ "$BAR_UTF" = 1 ] || part=0
+  i=0
+  while [ "$i" -lt "$full" ]; do bar="$bar$B_FULL"; i=$(( i + 1 )); done
+  rest=$(( width - full ))
+  if [ "$part" -gt 0 ]; then bar="$bar${B_PART[$part]}"; rest=$(( rest - 1 )); fi
+  i=0
+  while [ "$i" -lt "$rest" ]; do track="$track$B_TRACK"; i=$(( i + 1 )); done
+
+  # \r returns to the start of the line; \033[K (or spaces, without colours) wipes what a
+  # longer previous line left behind.
+  if [ "$BAR_ANSI" = 1 ]; then
+    printf '\r  %s%s%s%s%s%s%s%s%s\033[K' "$C_BAR" "$bar" "$C_TRACK" "$track" "$C_OFF" "$sizes" "$C_DIM" "$extra$file" "$C_OFF" > "$TTY"
+  else
+    pad=$(( COLS - 3 - width - ${#sizes} - ${#extra} - ${#file} ))
+    [ "$pad" -lt 0 ] && pad=0
+    printf '\r  %s%s%s%s%s%*s' "$bar" "$track" "$sizes" "$extra" "$file" "$pad" "" > "$TTY"
+  fi
 }
 
 draw_end() { printf '\n' > "$TTY"; }

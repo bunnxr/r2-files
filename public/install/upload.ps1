@@ -28,7 +28,8 @@ $Script:Dest     = ''                          # folder inside the bucket, '' = 
 $Script:Target   = 'R2'                        # shown in messages; u.bunnxr.com/local serves Dest 'zenith:/', Target 'Zenith'
 $Script:Block    = 1048576                     # 1 MiB: read size, and how often progress is redrawn
 $Script:Retries  = 3                           # tries per chunk before a file is given up on
-$Script:BarWidth = 26
+$Script:BarWidth = 30                          # widest the progress bar gets; it shrinks to fit narrow windows
+$Script:PlainBar = $false                      # $true = a # / - bar, for consoles whose font has no block characters
 
 # Windows PowerShell 5.1 still defaults to older TLS versions on some builds.
 try {
@@ -175,7 +176,23 @@ function Request-Password {
 #
 #  One line, redrawn in place. The byte counter is fed by the loop that
 #  writes into the request stream, so it tracks real upload progress.
+#
+#    ██████████████████▍              14.6 MB / 34.8 MB  3.1 MB/s  ETA 6s
+#
+#  A solid bar (cyan, on a dark grey track) that fills in eighths of a block,
+#  then the sizes, then speed, ETA and the file name in grey. The line is
+#  fitted to the window width so it never wraps. Colours come from
+#  Write-Host, so this works in the old console as well as Windows Terminal.
+#  The block characters are built from their codes, so they survive however
+#  the script was downloaded (irm | iex).
 # ---------------------------------------------------------------------
+if ($Script:PlainBar) {
+  $Script:BFull = '#'; $Script:BTrack = '-'; $Script:BPart = @('', '', '', '', '', '', '', '')
+} else {
+  $Script:BFull  = [string][char]0x2588                                    # full block
+  $Script:BTrack = [string][char]0x2588                                    # the same, in dark grey
+  $Script:BPart  = @('') + (0x258F, 0x258E, 0x258D, 0x258C, 0x258B, 0x258A, 0x2589 | ForEach-Object { [string][char]$_ }) # 1/8 … 7/8
+}
 $Script:JTotal = 0      # bytes in the whole job
 $Script:JDone  = 0      # bytes finished before the current file
 $Script:JStart = [DateTime]::UtcNow
@@ -186,25 +203,47 @@ $Script:JName  = ''     # its name
 function Draw {
   param([long]$DoneInFile)
   $done = $Script:JDone + $DoneInFile
-  $pct = 0
-  if ($Script:JTotal -gt 0) { $pct = [int](($done * 100) / $Script:JTotal) }
-  if ($pct -gt 100) { $pct = 100 }
-  $fill = [int](($pct * $Script:BarWidth) / 100)
-  $bar = ('#' * $fill) + ('.' * ($Script:BarWidth - $fill))
+  if ($Script:JTotal -gt 0 -and $done -gt $Script:JTotal) { $done = $Script:JTotal }
 
   $elapsed = ([DateTime]::UtcNow - $Script:JStart).TotalSeconds
   if ($elapsed -lt 1) { $elapsed = 1 }
   $rate = $done / $elapsed
   if ($rate -gt 0) { $eta = HumanTime (($Script:JTotal - $done) / $rate) } else { $eta = '--' }
 
-  $line = '[{0}] {1,3}%  {2} / {3}  {4}/s  {5} elapsed  ETA {6}' -f `
-    $bar, $pct, (HumanSize $done), (HumanSize $Script:JTotal), (HumanSize $rate),
-    (HumanTime $elapsed), $eta
-  if ($Script:JFiles -gt 1) {
-    $line = $line + ('  ({0}/{1} {2})' -f $Script:JIndex, $Script:JFiles, $Script:JName)
+  # The text after the bar. What does not fit the window goes: the file name first, then speed / ETA.
+  $cols = 80
+  try { $cols = [int]$Host.UI.RawUI.WindowSize.Width } catch { }
+  if ($cols -lt 20) { $cols = 80 }
+  $sizes = '  {0} / {1}' -f (HumanSize $done), (HumanSize $Script:JTotal)
+  $extra = '  {0}/s  ETA {1}' -f (HumanSize $rate), $eta
+  $file = ''
+  if ($Script:JFiles -gt 1) { $file = '  ({0}/{1} {2})' -f $Script:JIndex, $Script:JFiles, $Script:JName }
+  $width = [Math]::Min($Script:BarWidth, $cols - 3 - $sizes.Length)
+  if ($width -lt 10) { $width = 10 }
+  $room = $cols - 3 - $width - $sizes.Length
+  if ($extra.Length -gt $room) { $extra = '' }
+  $room = $room - $extra.Length
+  if ($file.Length -gt $room) {
+    if ($room -gt 12) { $file = $file.Substring(0, $room - 4) + '...)' } else { $file = '' }
   }
-  # The padding wipes whatever the previous, possibly longer, line left behind.
-  Write-Host -NoNewline ("`r" + $line.PadRight(118))
+
+  # The bar, in eighths of a block
+  if ($Script:JTotal -gt 0) { $eighths = [long][Math]::Floor(($done * $width * 8.0) / $Script:JTotal) } else { $eighths = $width * 8 }
+  $full = [int][Math]::Floor($eighths / 8)
+  $part = [int]($eighths % 8)
+  if ($Script:PlainBar) { $part = 0 }
+  $bar = $Script:BFull * $full
+  $rest = $width - $full
+  if ($part -gt 0) { $bar = $bar + $Script:BPart[$part]; $rest = $rest - 1 }
+
+  Write-Host -NoNewline "`r  "
+  Write-Host -NoNewline $bar -ForegroundColor Cyan
+  Write-Host -NoNewline ($Script:BTrack * $rest) -ForegroundColor DarkGray
+  Write-Host -NoNewline $sizes
+  Write-Host -NoNewline ($extra + $file) -ForegroundColor DarkGray
+  # Spaces wipe whatever a longer previous line left behind (the line stays one column short of the edge)
+  $pad = $cols - 3 - $width - $sizes.Length - $extra.Length - $file.Length
+  if ($pad -gt 0) { Write-Host -NoNewline (' ' * $pad) }
 }
 
 function Draw-End { Write-Host '' }
